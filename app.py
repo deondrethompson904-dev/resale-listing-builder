@@ -1,529 +1,718 @@
-import math
-import re
-from datetime import datetime
-
+import os
+import base64
+from pathlib import Path
+from dataclasses import dataclass
 import streamlit as st
 
-# =============================
-# BRAND (LOCKED) — v1
-# =============================
-APP_NAME = "Resale Listing Builder"
-TAGLINE = "List faster. Price smarter. Profit confidently."
-ACCENT = "#7c3aed"
-LOGO_PATH = "logo.svg"  # keep in repo root
-
-# Locked default assumptions (users can still edit the numbers in the tool)
-DEFAULT_EBAY_FEE_PCT = 13.25
-DEFAULT_PROCESSING_PCT = 2.90
-DEFAULT_PROCESSING_FIXED = 0.30
-DEFAULT_PACKAGING_COST = 1.50
-DEFAULT_SHIP_METHOD = "Ground (est.)"
-
-st.set_page_config(page_title=APP_NAME, page_icon="🧾", layout="wide")
 
 # =============================
-# Style
+# Page + Basic Theme
 # =============================
-st.markdown(
-    f"""
-    <style>
-      :root {{ --accent: {ACCENT}; }}
-
-      .rb-wrap {{ padding-top: 6px; }}
-      .rb-header {{
-        display:flex; align-items:center; gap:16px;
-        padding: 12px 14px;
-        border-radius: 16px;
-        border: 1px solid rgba(255,255,255,.08);
-        background: rgba(255,255,255,.03);
-      }}
-      .rb-title {{ font-size: 1.7rem; font-weight: 900; margin: 0; line-height: 1.1; }}
-      .rb-sub {{ opacity: .76; margin-top: 4px; font-size: 0.98rem; }}
-      .rb-divider {{ margin: 14px 0 18px 0; height: 1px; background: rgba(255,255,255,.08); }}
-      .rb-hint {{ opacity:.75; font-size: .92rem; }}
-
-      .pill {{
-        display:inline-block; padding:6px 10px; border-radius:999px;
-        border:1px solid rgba(255,255,255,.10);
-        background: rgba(255,255,255,.05);
-        font-size:.88rem; opacity:.95;
-      }}
-      .pill.good {{ border-color: rgba(34,197,94,.35); background: rgba(34,197,94,.12); }}
-      .pill.mid  {{ border-color: rgba(245,158,11,.35); background: rgba(245,158,11,.12); }}
-      .pill.bad  {{ border-color: rgba(239,68,68,.35); background: rgba(239,68,68,.12); }}
-
-      .card {{
-        border-radius: 16px;
-        border: 1px solid rgba(255,255,255,.08);
-        background: rgba(255,255,255,.03);
-        padding: 12px 14px;
-      }}
-      .card h4 {{ margin:0 0 6px 0; }}
-      .muted {{ opacity:.75; }}
-      a, a:visited {{ color: var(--accent) !important; }}
-      code {{ white-space: pre-wrap !important; }}
-    </style>
-    """,
-    unsafe_allow_html=True
+st.set_page_config(
+    page_title="Resale Listing Builder",
+    page_icon="🧾",
+    layout="wide",
+    initial_sidebar_state="expanded",
 )
+
+# Small CSS polish (logo size, spacing)
+st.markdown(
+    """
+<style>
+    .app-header {
+        display:flex;
+        align-items:center;
+        gap:16px;
+        padding: 8px 0 6px 0;
+    }
+    .app-logo img {
+        border-radius: 12px;
+        box-shadow: 0 6px 18px rgba(0,0,0,0.25);
+    }
+    .muted {
+        opacity: 0.85;
+        font-size: 0.95rem;
+    }
+    .tiny {
+        opacity: 0.7;
+        font-size: 0.85rem;
+    }
+    .section-card {
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 16px;
+        padding: 14px 14px 6px 14px;
+        margin-bottom: 14px;
+        background: rgba(255,255,255,0.02);
+    }
+</style>
+""",
+    unsafe_allow_html=True,
+)
+
 
 # =============================
 # Helpers
 # =============================
-def clean_spaces(s: str) -> str:
-    return re.sub(r"\s+", " ", (s or "").strip())
+def clamp(x: float, lo: float, hi: float) -> float:
+    return max(lo, min(hi, x))
 
-def title_case_smart(text: str) -> str:
-    if not text:
-        return ""
-    words = clean_spaces(text).split(" ")
-    small = {"a","an","and","as","at","but","by","for","if","in","nor","of","on","or","per","so","the","to","up","via","with","yet"}
-    out = []
-    for i, w in enumerate(words):
-        lw = w.lower()
-        if i in (0, len(words)-1) or lw not in small:
-            out.append(w[:1].upper() + w[1:])
-        else:
-            out.append(lw)
-    return " ".join(out)
 
-def shipping_estimate(weight_lb: float, shipping_method: str, packaging_cost: float):
-    w = max(0.0, float(weight_lb or 0.0))
-    if shipping_method == "Local pickup":
-        ship = 0.0
-    elif shipping_method == "USPS Priority (est.)":
-        ship = 8.50 + 1.25 * w
-    else:  # Ground
-        ship = 6.75 + 1.05 * w
+def money(x: float) -> str:
+    return f"${x:,.2f}"
 
-    ship = math.ceil(ship * 4) / 4.0
-    return max(0.0, ship + max(0.0, packaging_cost or 0.0))
 
-def fees_estimate(sale_price: float, ebay_final_value_pct: float, payment_processing_pct: float, payment_processing_fixed: float):
-    p = max(0.0, float(sale_price or 0.0))
-    ebay_fee = p * (max(0.0, ebay_final_value_pct) / 100.0)
-    pay_fee = p * (max(0.0, payment_processing_pct) / 100.0) + max(0.0, payment_processing_fixed)
-    return ebay_fee, pay_fee
-
-def profit_estimate(sale_price, cogs, ship_cost, ebay_pct, proc_pct, proc_fixed):
-    ebay_fee, pay_fee = fees_estimate(sale_price, ebay_pct, proc_pct, proc_fixed)
-    profit = float(sale_price or 0) - float(cogs or 0) - float(ship_cost or 0) - ebay_fee - pay_fee
-    margin = (profit / sale_price * 100.0) if sale_price and sale_price > 0 else 0.0
-    return profit, margin, ebay_fee, pay_fee
-
-def profit_status(profit: float, margin_pct: float):
+def load_local_or_url_logo(logo_url: str | None) -> str | None:
     """
-    Simple & intuitive:
-      Good: profit >= $20 OR margin >= 25%
-      Thin: profit >= $5  OR margin >= 10%
-      Bad: otherwise
+    Returns an HTML <img> src value:
+      - If URL is provided -> return as-is
+      - Else tries local files:
+          assets/logo.png, assets/logo.jpg, assets/logo.jpeg, assets/logo.svg,
+          logo.png, logo.jpg, logo.jpeg, logo.svg
     """
-    if profit >= 20 or margin_pct >= 25:
-        return ("GOOD", "good")
-    if profit >= 5 or margin_pct >= 10:
-        return ("THIN", "mid")
-    return ("BAD", "bad")
+    if logo_url and logo_url.strip():
+        return logo_url.strip()
 
-def break_even_sale_price(cogs, ship_cost, ebay_pct, proc_pct, proc_fixed):
+    candidates = [
+        Path("assets/logo.png"),
+        Path("assets/logo.jpg"),
+        Path("assets/logo.jpeg"),
+        Path("assets/logo.svg"),
+        Path("logo.png"),
+        Path("logo.jpg"),
+        Path("logo.jpeg"),
+        Path("logo.svg"),
+    ]
+    for p in candidates:
+        if p.exists() and p.is_file():
+            # Convert to data URI so it works everywhere (Streamlit Cloud, etc.)
+            data = p.read_bytes()
+            ext = p.suffix.lower().lstrip(".")
+            if ext == "svg":
+                mime = "image/svg+xml"
+            elif ext in ("png", "jpg", "jpeg"):
+                mime = f"image/{'jpeg' if ext in ('jpg','jpeg') else 'png'}"
+            else:
+                continue
+            b64 = base64.b64encode(data).decode("utf-8")
+            return f"data:{mime};base64,{b64}"
+
+    return None
+
+
+@dataclass
+class FeeModel:
+    ebay_fee_pct: float = 13.25
+    processing_pct: float = 2.90
+    processing_fixed: float = 0.30
+
+
+def estimate_shipping(weight_lb: float, method: str) -> float:
     """
-    Solve for P where:
-      P - cogs - ship - (P*ebay%) - (P*proc% + proc_fixed) = 0
-    => P*(1 - ebay - proc) = cogs + ship + proc_fixed
+    Simple offline-friendly estimate.
+    You can tune these later if you want.
     """
-    cogs = float(cogs or 0)
-    ship_cost = float(ship_cost or 0)
-    ebay = max(0.0, float(ebay_pct or 0)) / 100.0
-    proc = max(0.0, float(proc_pct or 0)) / 100.0
-    fixed = max(0.0, float(proc_fixed or 0))
+    w = max(0.0, weight_lb)
 
-    denom = 1.0 - ebay - proc
-    if denom <= 0:
-        return None
-    return (cogs + ship_cost + fixed) / denom
+    # Rough buckets (USD)
+    if method == "Local pickup":
+        return 0.00
+    if method == "USPS Ground Advantage (est.)":
+        # decent for small/medium
+        if w <= 1:
+            return 6.50
+        if w <= 3:
+            return 8.75
+        if w <= 5:
+            return 10.75
+        if w <= 10:
+            return 14.25
+        return 18.50
+    if method == "UPS Ground (est.)":
+        if w <= 1:
+            return 8.50
+        if w <= 5:
+            return 12.50
+        if w <= 10:
+            return 16.50
+        if w <= 20:
+            return 24.00
+        return 34.00
+    if method == "FedEx Ground (est.)":
+        if w <= 1:
+            return 8.75
+        if w <= 5:
+            return 13.00
+        if w <= 10:
+            return 17.00
+        if w <= 20:
+            return 25.00
+        return 36.00
 
-def keyword_pack(brand, item, model, key_features):
-    base = []
-    for x in [brand, item, model]:
-        x = clean_spaces(x)
-        if x:
-            base.append(x)
-    feats = [clean_spaces(f) for f in key_features if clean_spaces(f)]
+    # fallback
+    return 12.00
 
-    all_words = []
-    for phrase in base + feats:
-        all_words.append(phrase)
-        all_words += phrase.split(" ")
 
-    seen = set()
-    out = []
-    for w in all_words:
-        w = clean_spaces(w)
-        if not w:
-            continue
-        lw = w.lower()
-        if lw in seen:
-            continue
-        if len(lw) < 3:
-            continue
-        seen.add(lw)
-        out.append(w)
-    return out[:30]
+def calc_profit(
+    sale_price: float,
+    cogs: float,
+    shipping_cost: float,
+    packaging_cost: float,
+    fee_model: FeeModel,
+) -> dict:
+    sale_price = max(0.0, sale_price)
+    cogs = max(0.0, cogs)
+    shipping_cost = max(0.0, shipping_cost)
+    packaging_cost = max(0.0, packaging_cost)
 
-def generate_title(brand, item, model, key_features, condition, platform="ebay"):
-    parts = []
-    if brand: parts.append(brand)
-    if item: parts.append(item)
-    if model: parts.append(model)
+    ebay_fee = sale_price * (fee_model.ebay_fee_pct / 100.0)
+    processing_fee = sale_price * (fee_model.processing_pct / 100.0) + fee_model.processing_fixed
 
-    feat = [clean_spaces(f) for f in key_features if clean_spaces(f)]
-    cond_snip = ""
+    total_fees = ebay_fee + processing_fee
+    total_costs = cogs + shipping_cost + packaging_cost + total_fees
+    net_profit = sale_price - total_costs
+
+    roi = (net_profit / cogs * 100.0) if cogs > 0 else 0.0
+    margin = (net_profit / sale_price * 100.0) if sale_price > 0 else 0.0
+
+    return {
+        "ebay_fee": ebay_fee,
+        "processing_fee": processing_fee,
+        "total_fees": total_fees,
+        "total_costs": total_costs,
+        "net_profit": net_profit,
+        "roi_pct": roi,
+        "margin_pct": margin,
+    }
+
+
+def flip_verdict(net_profit: float, roi_pct: float, min_profit: float, min_roi: float) -> tuple[str, str]:
+    """
+    Returns (label, reason)
+    """
+    if net_profit >= min_profit and roi_pct >= min_roi:
+        return ("✅ YES", "Meets your minimum profit and ROI.")
+    if net_profit >= (min_profit * 0.6) or roi_pct >= (min_roi * 0.6):
+        return ("🟡 MAYBE", "Close. Consider negotiating, raising price, or lowering shipping/fees.")
+    return ("❌ NO", "Too thin. Profit/ROI is below your thresholds.")
+
+
+def build_listing_outputs(
+    brand: str,
+    item: str,
+    model: str,
+    condition: str,
+    category: str,
+    quantity: int,
+    features_lines: list[str],
+    flaws_lines: list[str],
+    seller_name: str,
+    city_area: str,
+    pickup_line: str,
+    shipping_line: str,
+    handling_time: str,
+    returns_line: str,
+    auto_parts_repair_text: bool,
+) -> dict:
+    brand = (brand or "").strip()
+    item = (item or "").strip()
+    model = (model or "").strip()
+    condition = (condition or "").strip()
+    category = (category or "").strip()
+
+    features_lines = [x.strip() for x in features_lines if x.strip()]
+    flaws_lines = [x.strip() for x in flaws_lines if x.strip()]
+
+    # Title
+    pieces = []
+    if brand:
+        pieces.append(brand)
+    if item:
+        pieces.append(item)
+    if model:
+        pieces.append(model)
     if condition:
-        c = condition.lower()
-        if "new" in c and "open" not in c:
-            cond_snip = "New"
-        elif "open" in c:
-            cond_snip = "Open Box"
-        elif "used" in c:
-            cond_snip = "Used"
-        elif "parts" in c or "repair" in c:
-            cond_snip = "For Parts/Repair"
-        else:
-            cond_snip = title_case_smart(condition)
+        pieces.append(condition)
+    title = " ".join(pieces)
+    title = title[:80]  # eBay title soft cap
 
-    max_len = 80 if platform == "ebay" else 100
-    base = " ".join([p for p in parts if p])
-    candidate = base
-
-    for f in feat[:2]:
-        trial = clean_spaces(f"{candidate} {f}")
-        if len(trial) <= max_len:
-            candidate = trial
-
-    if cond_snip:
-        trial = clean_spaces(f"{candidate} {cond_snip}")
-        if len(trial) <= max_len:
-            candidate = trial
-
-    if len(candidate) > max_len:
-        candidate = candidate[:max_len].rstrip()
-
-    return title_case_smart(candidate)
-
-def build_description(
-    brand, item, model, key_features, condition,
-    flaws, whats_included, measurements, notes,
-    platform: str
-):
-    bullets = []
+    # Description blocks
+    intro = []
     if brand or item or model:
-        bullets.append(f"Item: {clean_spaces(' '.join([x for x in [brand, item, model] if x]))}")
-    if condition:
-        bullets.append(f"Condition: {condition}")
+        intro.append(f"**Item:** {brand} {item} {model}".strip())
+    intro.append(f"**Condition:** {condition}")
+    if category:
+        intro.append(f"**Category:** {category}")
+    if quantity and quantity > 1:
+        intro.append(f"**Quantity:** {quantity}")
 
-    feats = [clean_spaces(f) for f in key_features if clean_spaces(f)]
-    if feats:
-        bullets.append("Key Features: " + "; ".join(feats))
+    feat_block = ""
+    if features_lines:
+        feat_block = "\n".join([f"- {f}" for f in features_lines])
 
-    if measurements:
-        bullets.append(f"Measurements: {measurements}")
-    if whats_included:
-        bullets.append(f"Included: {whats_included}")
-    if flaws:
-        bullets.append(f"Known Issues/Flaws: {flaws}")
-    if notes:
-        bullets.append(f"Notes: {notes}")
+    flaws_block = ""
+    if flaws_lines:
+        flaws_block = "\n".join([f"- {f}" for f in flaws_lines])
 
-    protection = []
-    if condition and ("parts" in condition.lower() or "repair" in condition.lower()):
-        protection.append("⚠️ Sold AS-IS for parts/repair. No guarantees. Not fully tested unless stated.")
-        protection.append("⚠️ Buyer is responsible for ensuring compatibility / fit / function.")
+    seller_block = []
+    if seller_name:
+        seller_block.append(f"**Seller:** {seller_name}")
+    if city_area:
+        seller_block.append(f"**Location:** {city_area}")
+    if pickup_line:
+        seller_block.append(f"**Pickup:** {pickup_line}")
+    if shipping_line:
+        seller_block.append(f"**Shipping:** {shipping_line}")
+    if handling_time:
+        seller_block.append(f"**Handling time:** {handling_time}")
+    if returns_line:
+        seller_block.append(f"**Returns:** {returns_line}")
 
-    if platform == "fb":
-        intro = "Available for pickup or shipping. Details below:"
-        outro = "Message me if you want it (include your ZIP for a shipping quote) or to arrange pickup."
-    else:
-        intro = "Please review the details below before purchasing:"
-        outro = "Fast handling. Please message with any questions before buying."
-
-    lines = [intro, ""]
-    for p in protection:
-        lines.append(p)
-    if protection:
-        lines.append("")
-
-    for b in bullets:
-        lines.append(f"• {b}")
-
-    lines += ["", outro]
-    return "\n".join(lines)
-
-# =============================
-# Header
-# =============================
-st.markdown("<div class='rb-wrap'>", unsafe_allow_html=True)
-
-hcol1, hcol2 = st.columns([0.20, 0.80], vertical_alignment="center")
-with hcol1:
-    try:
-        st.image(LOGO_PATH, width=140)
-    except Exception:
-        st.markdown(
-            "<div style='width:140px;height:140px;border-radius:20px;border:1px solid rgba(255,255,255,.10);"
-            "background:rgba(255,255,255,.03);display:flex;align-items:center;justify-content:center;'>"
-            "<div style='width:12px;height:12px;border-radius:999px;background:var(--accent);box-shadow:0 0 20px var(--accent);'></div>"
-            "</div>",
-            unsafe_allow_html=True
+    parts_repair = ""
+    if auto_parts_repair_text:
+        parts_repair = (
+            "\n\n**For parts/repair notice:**\n"
+            "This item is sold **as-is** for parts/repair. Please review photos and description carefully "
+            "and ask any questions before purchase."
         )
 
-with hcol2:
-    st.markdown(f"<div class='rb-title'>{APP_NAME}</div>", unsafe_allow_html=True)
-    st.markdown(f"<div class='rb-sub'>{TAGLINE}</div>", unsafe_allow_html=True)
-    st.markdown("<div class='rb-hint'>Tip: choose <b>For Parts/Repair</b> for broken items → auto-add protection text.</div>", unsafe_allow_html=True)
+    ebay_desc = (
+        "\n".join(intro)
+        + "\n\n"
+        + ("**Key features:**\n" + feat_block + "\n\n" if feat_block else "")
+        + ("**Notes / flaws:**\n" + flaws_block + "\n\n" if flaws_block else "")
+        + ("**Seller info:**\n" + "\n".join(seller_block) if seller_block else "")
+        + parts_repair
+    ).strip()
 
-st.markdown("<div class='rb-divider'></div>", unsafe_allow_html=True)
+    fb_desc = (
+        f"{title}\n\n"
+        + ("Key features:\n" + "\n".join([f"• {f}" for f in features_lines]) + "\n\n" if features_lines else "")
+        + ("Notes / flaws:\n" + "\n".join([f"• {f}" for f in flaws_lines]) + "\n\n" if flaws_lines else "")
+        + ("\n".join([x.replace("**", "") for x in seller_block]) if seller_block else "")
+        + (parts_repair.replace("**", "") if parts_repair else "")
+    ).strip()
+
+    keywords = []
+    for x in [brand, item, model, category, condition]:
+        if x:
+            keywords.extend([w.strip() for w in x.replace("/", " ").split() if w.strip()])
+    # de-dup preserving order
+    seen = set()
+    keywords_unique = []
+    for k in keywords:
+        lk = k.lower()
+        if lk not in seen:
+            seen.add(lk)
+            keywords_unique.append(k)
+    keyword_string = ", ".join(keywords_unique[:25])
+
+    return {
+        "title": title,
+        "ebay_description": ebay_desc,
+        "fb_description": fb_desc,
+        "keywords": keyword_string,
+    }
+
 
 # =============================
-# Main App Tabs (Customer-facing)
+# Session Defaults
 # =============================
-tab_builder, tab_flip, tab_help = st.tabs(["🧾 Listing Builder", "✅ Flip Checker", "ℹ️ How it works"])
+if "app_name" not in st.session_state:
+    st.session_state.app_name = "Resale Listing Builder"
+if "tagline" not in st.session_state:
+    st.session_state.tagline = "List faster. Price smarter. Profit confidently."
+if "accent_color" not in st.session_state:
+    st.session_state.accent_color = "#7c3aed"
+if "logo_url" not in st.session_state:
+    st.session_state.logo_url = os.getenv("LOGO_URL", "").strip()
+if "logo_size" not in st.session_state:
+    st.session_state.logo_size = 56
+
+if "seller_name" not in st.session_state:
+    st.session_state.seller_name = "Deondre"
+if "city_area" not in st.session_state:
+    st.session_state.city_area = "Jacksonville, FL"
+if "pickup_line" not in st.session_state:
+    st.session_state.pickup_line = "Porch pickup / meetup"
+if "shipping_line" not in st.session_state:
+    st.session_state.shipping_line = "Ships within the US"
+if "handling_time" not in st.session_state:
+    st.session_state.handling_time = "Same or next business day"
+if "returns_line" not in st.session_state:
+    st.session_state.returns_line = "No returns (ask questions before buying)"
+if "auto_parts_repair_text" not in st.session_state:
+    st.session_state.auto_parts_repair_text = True
+
+if "fee_model" not in st.session_state:
+    st.session_state.fee_model = FeeModel()
+if "shipping_method" not in st.session_state:
+    st.session_state.shipping_method = "USPS Ground Advantage (est.)"
+
+if "admin_unlocked" not in st.session_state:
+    st.session_state.admin_unlocked = False
+
 
 # =============================
-# TAB 1 — Listing Builder
+# Sidebar: Admin Gate (Owner Mode)
+# =============================
+ADMIN_PIN = os.getenv("ADMIN_PIN", "").strip()
+
+with st.sidebar:
+    st.markdown("### 🔒 Owner Mode")
+    if ADMIN_PIN:
+        if not st.session_state.admin_unlocked:
+            pin = st.text_input("Enter admin PIN", type="password")
+            if st.button("Unlock"):
+                if pin == ADMIN_PIN:
+                    st.session_state.admin_unlocked = True
+                    st.success("Owner Mode unlocked.")
+                else:
+                    st.error("Wrong PIN.")
+        else:
+            st.success("Owner Mode is ON")
+            if st.button("Lock"):
+                st.session_state.admin_unlocked = False
+                st.info("Owner Mode locked.")
+    else:
+        st.caption("Tip: set `ADMIN_PIN` env var to hide Settings from customers.")
+        st.session_state.admin_unlocked = True  # if no pin, allow (dev mode)
+
+
+# =============================
+# Sidebar: Settings (Owner Only)
+# =============================
+if st.session_state.admin_unlocked:
+    with st.sidebar:
+        st.markdown("---")
+        st.markdown("## ⚙️ Settings")
+
+        with st.expander("Branding", expanded=True):
+            st.session_state.app_name = st.text_input("App name", st.session_state.app_name)
+            st.session_state.tagline = st.text_input("Tagline", st.session_state.tagline)
+            st.session_state.accent_color = st.color_picker("Accent color", st.session_state.accent_color)
+
+            st.caption("Logo options: set LOGO_URL env var, paste a URL here, or add logo.svg/logo.png to repo.")
+            st.session_state.logo_url = st.text_input("Logo URL (optional)", st.session_state.logo_url)
+            st.session_state.logo_size = st.slider("Logo size", 36, 96, int(st.session_state.logo_size), 4)
+
+        with st.expander("Personalization (auto-added to descriptions)", expanded=False):
+            st.session_state.seller_name = st.text_input("Your name (optional)", st.session_state.seller_name)
+            st.session_state.city_area = st.text_input("City/Area", st.session_state.city_area)
+            st.session_state.pickup_line = st.text_input("Pickup line", st.session_state.pickup_line)
+            st.session_state.shipping_line = st.text_input("Shipping line", st.session_state.shipping_line)
+            st.session_state.handling_time = st.text_input("Handling time", st.session_state.handling_time)
+            st.session_state.returns_line = st.text_input("Returns policy line", st.session_state.returns_line)
+            st.session_state.auto_parts_repair_text = st.toggle(
+                "Auto add 'For parts/repair' protection text",
+                value=st.session_state.auto_parts_repair_text,
+            )
+
+        with st.expander("Default fee model", expanded=False):
+            fm: FeeModel = st.session_state.fee_model
+            fm.ebay_fee_pct = st.number_input("eBay fee % (est.)", min_value=0.0, max_value=30.0, value=float(fm.ebay_fee_pct), step=0.25)
+            fm.processing_pct = st.number_input("Processing % (est.)", min_value=0.0, max_value=10.0, value=float(fm.processing_pct), step=0.05)
+            fm.processing_fixed = st.number_input("Processing fixed ($)", min_value=0.0, max_value=5.0, value=float(fm.processing_fixed), step=0.05)
+            st.session_state.fee_model = fm
+
+
+# =============================
+# Header (Logo + Title)
+# =============================
+logo_src = load_local_or_url_logo(st.session_state.logo_url)
+logo_html = ""
+if logo_src:
+    logo_html = f"""
+    <div class="app-logo">
+      <img src="{logo_src}" width="{int(st.session_state.logo_size)}" height="{int(st.session_state.logo_size)}"/>
+    </div>
+    """
+
+st.markdown(
+    f"""
+<div class="app-header">
+  {logo_html}
+  <div>
+    <div style="font-size: 1.8rem; font-weight: 800;">{st.session_state.app_name}</div>
+    <div class="muted">{st.session_state.tagline}</div>
+  </div>
+</div>
+""",
+    unsafe_allow_html=True,
+)
+
+st.markdown(f"<div class='tiny'>Offline-friendly v1 • Generates listings + estimates profit (fees + shipping).</div>", unsafe_allow_html=True)
+st.markdown("---")
+
+
+# =============================
+# Tabs
+# =============================
+tab_builder, tab_flip, tab_soon, tab_help = st.tabs(
+    ["🧾 Listing Builder", "✅ Flip Checker", "🚀 Coming Soon", "ℹ️ How it works"]
+)
+
+# =============================
+# TAB 1 — Listing Builder + Profit Calculator
 # =============================
 with tab_builder:
-    top_actions = st.columns([0.75, 0.25])
-    with top_actions[1]:
-        if st.button("Reset form", use_container_width=True):
-            for k in list(st.session_state.keys()):
-                if k.startswith("rb_"):
-                    del st.session_state[k]
-            st.rerun()
-
-    left, right = st.columns([1.1, 0.9], gap="large")
+    left, right = st.columns([1.15, 1.0], gap="large")
 
     with left:
+        st.markdown("<div class='section-card'>", unsafe_allow_html=True)
         st.subheader("1) Item info")
-        a, b = st.columns(2)
-        with a:
-            brand = st.text_input("Brand", placeholder="Apple, DeWalt, Nike, etc.", key="rb_brand")
-            item = st.text_input("Item", placeholder="MacBook Pro, Drill, Sneakers, etc.", key="rb_item")
-            model = st.text_input("Model / Part # (optional)", placeholder="A1990, DCD791, etc.", key="rb_model")
-        with b:
-            condition = st.selectbox(
-                "Condition",
-                ["New", "Open Box", "Used - Good", "Used - Fair", "For Parts/Repair"],
-                index=2,
-                key="rb_condition"
-            )
-            category = st.text_input("Category (optional)", placeholder="Electronics, Tools, Home, etc.", key="rb_category")
-            quantity = st.number_input("Quantity", min_value=1, max_value=999, value=1, step=1, key="rb_qty")
 
+        brand = st.text_input("Brand", placeholder="Apple, DeWalt, Nike, etc.")
+        item = st.text_input("Item", placeholder="MacBook Pro, Drill, Sneakers, etc.")
+        model = st.text_input("Model / Part # (optional)", placeholder="A1990, DCD791, etc.")
+        condition = st.selectbox("Condition", ["New", "Open box", "Used - Like new", "Used - Good", "Used - Fair", "For parts/repair"])
+        category = st.text_input("Category (optional)", placeholder="Electronics, Tools, Home, etc.")
+        quantity = st.number_input("Quantity", min_value=1, max_value=100, value=1, step=1)
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        st.markdown("<div class='section-card'>", unsafe_allow_html=True)
         st.subheader("2) Features & notes")
-        feat_text = st.text_area(
-            "Key features (one per line)",
-            placeholder="Example:\n16GB RAM\n512GB SSD\nIncludes charger\nTested & works",
-            height=140,
-            key="rb_feats"
-        )
-        key_features = [f for f in feat_text.split("\n") if clean_spaces(f)]
 
-        flaws = st.text_input("Known flaws / issues (optional)", placeholder="Small rip, screen crack, missing remote, etc.", key="rb_flaws")
-        whats_included = st.text_input("What's included (optional)", placeholder="Charger, box, manuals, accessories, etc.", key="rb_included")
-        measurements = st.text_input("Measurements (optional)", placeholder='13" laptop, 10x8x6 in, etc.', key="rb_meas")
-        notes = st.text_area("Extra notes (optional)", placeholder="Testing details, pickup info, smoke-free home, etc.", height=90, key="rb_notes")
+        features_text = st.text_area(
+            "Key features (one per line)",
+            placeholder="Example:\n16GB RAM\n512GB SSD\nIncludes charger",
+            height=120,
+        )
+        flaws_text = st.text_area(
+            "Notes / flaws (one per line)",
+            placeholder="Example:\nSmall scratch on lid\nBattery service recommended",
+            height=90,
+        )
+
+        st.markdown("</div>", unsafe_allow_html=True)
 
     with right:
+        st.markdown("<div class='section-card'>", unsafe_allow_html=True)
         st.subheader("3) Money math")
-        c1, c2 = st.columns(2)
-        with c1:
-            cogs = st.number_input("Your cost (COGS) $", min_value=0.0, value=10.0, step=0.50, key="rb_cogs")
-            target_price = st.number_input("Target sale price $", min_value=0.0, value=49.99, step=1.00, key="rb_target")
-            weight_lb = st.number_input("Estimated weight (lb)", min_value=0.0, value=2.0, step=0.25, key="rb_wt")
-        with c2:
-            ebay_pct = st.number_input("eBay fee % (est.)", min_value=0.0, max_value=30.0, value=float(DEFAULT_EBAY_FEE_PCT), step=0.25, key="rb_ebay")
-            proc_pct = st.number_input("Processing % (est.)", min_value=0.0, max_value=10.0, value=float(DEFAULT_PROCESSING_PCT), step=0.1, key="rb_proc")
-            proc_fixed = st.number_input("Processing fixed ($)", min_value=0.0, max_value=2.0, value=float(DEFAULT_PROCESSING_FIXED), step=0.05, key="rb_fixed")
 
-        ship_method = st.selectbox(
+        cogs = st.number_input("Your cost (COGS) $", min_value=0.0, value=10.00, step=1.00)
+        target_sale = st.number_input("Target sale price $", min_value=0.0, value=49.99, step=1.00)
+        weight = st.number_input("Estimated weight (lb)", min_value=0.0, value=2.0, step=0.25)
+
+        shipping_method = st.selectbox(
             "Shipping method",
-            ["Ground (est.)", "USPS Priority (est.)", "Local pickup"],
-            index=["Ground (est.)", "USPS Priority (est.)", "Local pickup"].index(DEFAULT_SHIP_METHOD),
-            key="rb_ship_method"
+            ["USPS Ground Advantage (est.)", "UPS Ground (est.)", "FedEx Ground (est.)", "Local pickup"],
+            index=["USPS Ground Advantage (est.)", "UPS Ground (est.)", "FedEx Ground (est.)", "Local pickup"].index(st.session_state.shipping_method)
+            if st.session_state.shipping_method in ["USPS Ground Advantage (est.)", "UPS Ground (est.)", "FedEx Ground (est.)", "Local pickup"]
+            else 0,
         )
-        packaging = st.number_input("Packaging cost ($)", min_value=0.0, max_value=20.0, value=float(DEFAULT_PACKAGING_COST), step=0.25, key="rb_pack")
+        st.session_state.shipping_method = shipping_method
 
-        est_ship = shipping_estimate(weight_lb, ship_method, packaging)
+        packaging_cost = st.number_input("Packaging cost ($)", min_value=0.0, value=1.50, step=0.25)
 
-        # Profit indicator for target price
-        p_target, m_target, ebay_fee_t, pay_fee_t = profit_estimate(target_price, cogs, est_ship, ebay_pct, proc_pct, proc_fixed)
-        label, css = profit_status(p_target, m_target)
+        fm: FeeModel = st.session_state.fee_model
+        ship_est = estimate_shipping(weight, shipping_method)
 
-        st.markdown(
-            f"""
-            <div class="card">
-              <h4>Target Profit Snapshot</h4>
-              <div class="pill {css}"><b>{label}</b> • Profit ${p_target:,.2f} • Margin {m_target:.1f}%</div><br><br>
-              <div class="muted">Shipping+packaging: <b>${est_ship:,.2f}</b> ({ship_method})</div>
-              <div class="muted">Est. fees: eBay <b>${ebay_fee_t:,.2f}</b> + processing <b>${pay_fee_t:,.2f}</b></div>
-            </div>
-            """,
-            unsafe_allow_html=True
+        results = calc_profit(
+            sale_price=target_sale,
+            cogs=cogs,
+            shipping_cost=ship_est,
+            packaging_cost=packaging_cost,
+            fee_model=fm,
         )
 
-        be = break_even_sale_price(cogs, est_ship, ebay_pct, proc_pct, proc_fixed)
-        if be is None:
-            st.warning("Your fee % settings are too high to compute a break-even price.")
-        else:
-            st.info(f"Break-even sale price (est.): **${be:,.2f}**")
+        st.markdown("---")
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Net profit", money(results["net_profit"]))
+        m2.metric("Margin", f'{results["margin_pct"]:.1f}%')
+        m3.metric("ROI (on COGS)", f'{results["roi_pct"]:.1f}%')
 
+        with st.expander("See breakdown", expanded=False):
+            st.write(f"Shipping estimate: **{money(ship_est)}** ({shipping_method})")
+            st.write(f"eBay fee est.: **{money(results['ebay_fee'])}** ({fm.ebay_fee_pct:.2f}%)")
+            st.write(f"Processing est.: **{money(results['processing_fee'])}** ({fm.processing_pct:.2f}% + {money(fm.processing_fixed)})")
+            st.write(f"Packaging: **{money(packaging_cost)}**")
+            st.write(f"Total costs (incl. fees): **{money(results['total_costs'])}**")
+
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        st.markdown("<div class='section-card'>", unsafe_allow_html=True)
         st.subheader("Quick pricing tiers")
-        low = round(target_price * 0.85, 2)
-        mid = round(target_price, 2)
-        high = round(target_price * 1.15, 2)
 
-        for label2, price in [("Low (fast sale)", low), ("Target", mid), ("High (patient)", high)]:
-            profit, margin, ebay_fee, pay_fee = profit_estimate(price, cogs, est_ship, ebay_pct, proc_pct, proc_fixed)
-            status_txt, status_css = profit_status(profit, margin)
-            st.markdown(
-                f"""
-                <div class="card" style="margin-top:10px;">
-                  <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;">
-                    <div><b>{label2}: ${price:,.2f}</b></div>
-                    <div class="pill {status_css}"><b>{status_txt}</b> • ${profit:,.2f} • {margin:.1f}%</div>
-                  </div>
-                  <div class="muted" style="margin-top:6px;">
-                    Shipping+packaging: <b>${est_ship:,.2f}</b> • Fees: eBay <b>${ebay_fee:,.2f}</b> + processing <b>${pay_fee:,.2f}</b>
-                  </div>
-                </div>
-                """,
-                unsafe_allow_html=True
-            )
+        # Simple tier suggestions based on adding profit on top of costs
+        desired_profits = [10, 20, 35]
+        tier_cols = st.columns(3)
+        for i, p in enumerate(desired_profits):
+            # solve approximate price ignoring price-dependent fees -> quick heuristic
+            base = cogs + ship_est + packaging_cost + p
+            # adjust for pct fees (approx)
+            pct_total = (fm.ebay_fee_pct + fm.processing_pct) / 100.0
+            approx_price = (base + fm.processing_fixed) / max(0.01, (1 - pct_total))
+            approx_price = round(approx_price + 0.01, 2)
+            tier_cols[i].metric(f"~{money(p)} profit", money(approx_price))
 
-    # =============================
-    # Outputs (Copy-ready)
-    # =============================
-    st.subheader("4) Generate listings (copy-ready)")
+        st.caption("These are quick estimates. Use the main calculator for exact breakdown.")
+        st.markdown("</div>", unsafe_allow_html=True)
 
-    ebay_title = generate_title(brand, item, model, key_features, condition, platform="ebay")
-    fb_title = generate_title(brand, item, model, key_features, condition, platform="fb")
+    # Build outputs
+    features_lines = features_text.splitlines() if features_text else []
+    flaws_lines = flaws_text.splitlines() if flaws_text else []
 
-    ebay_desc = build_description(
-        brand, item, model, key_features, condition,
-        flaws, whats_included, measurements, notes,
-        platform="ebay"
-    )
-    fb_desc = build_description(
-        brand, item, model, key_features, condition,
-        flaws, whats_included, measurements, notes,
-        platform="fb"
+    outputs = build_listing_outputs(
+        brand=brand,
+        item=item,
+        model=model,
+        condition=condition,
+        category=category,
+        quantity=int(quantity),
+        features_lines=features_lines,
+        flaws_lines=flaws_lines,
+        seller_name=st.session_state.seller_name,
+        city_area=st.session_state.city_area,
+        pickup_line=st.session_state.pickup_line,
+        shipping_line=st.session_state.shipping_line,
+        handling_time=st.session_state.handling_time,
+        returns_line=st.session_state.returns_line,
+        auto_parts_repair_text=st.session_state.auto_parts_repair_text or (condition.lower().startswith("for parts")),
     )
 
-    keywords = keyword_pack(brand, item, model, key_features)
-    keywords_csv = ", ".join(keywords)
+    st.markdown("### 4) Outputs (copy/paste)")
+    out_a, out_b = st.columns(2, gap="large")
 
-    out1, out2 = st.tabs(["eBay Listing", "Facebook Listing"])
+    with out_a:
+        st.markdown("**eBay Title**")
+        st.code(outputs["title"], language=None)
 
-    with out1:
-        st.markdown("### eBay")
-        st.caption("Click the copy icon on the right side of each code box.")
-        st.markdown("**Title (<=80 chars)**")
-        st.code(ebay_title, language="text")
-        st.markdown("**Description**")
-        st.code(ebay_desc, language="text")
+        st.markdown("**eBay Description**")
+        st.code(outputs["ebay_description"], language="markdown")
+
+    with out_b:
+        st.markdown("**Facebook Marketplace Description**")
+        st.code(outputs["fb_description"], language=None)
+
         st.markdown("**Keywords**")
-        st.code(keywords_csv, language="text")
+        st.code(outputs["keywords"], language=None)
 
-    with out2:
-        st.markdown("### Facebook Marketplace")
-        st.caption("Click the copy icon on the right side of each code box.")
-        st.markdown("**Title**")
-        st.code(fb_title, language="text")
-        st.markdown("**Description**")
-        st.code(fb_desc, language="text")
-        st.markdown("**Keywords/Tags**")
-        st.code(keywords_csv, language="text")
+    st.caption("Tip: Streamlit code blocks have a built-in copy button in the top-right.")
+
 
 # =============================
-# TAB 2 — Flip Checker (YES / MAYBE / NO)
+# TAB 2 — Flip Checker
 # =============================
 with tab_flip:
-    st.subheader("Flip Checker (before you buy)")
-    st.write("Quickly decide if an item is worth flipping based on **real profit after fees + shipping**.")
+    st.subheader("Flip Checker (YES / MAYBE / NO)")
 
-    c1, c2, c3 = st.columns(3)
+    c1, c2 = st.columns([1.0, 1.0], gap="large")
+
     with c1:
-        buy_price = st.number_input("Buy price (what you pay) $", min_value=0.0, value=20.0, step=1.0, key="rb_fc_buy")
-        expected_sale = st.number_input("Expected sale price $", min_value=0.0, value=60.0, step=1.0, key="rb_fc_sale")
+        st.markdown("<div class='section-card'>", unsafe_allow_html=True)
+        st.write("Enter your deal numbers and thresholds. This gives you a quick decision.")
+        deal_cost = st.number_input("Your total cost (COGS) $", min_value=0.0, value=20.00, step=1.00, key="deal_cost")
+        expected_sale = st.number_input("Expected sale price $", min_value=0.0, value=150.00, step=1.00, key="expected_sale")
+        est_weight = st.number_input("Estimated weight (lb)", min_value=0.0, value=2.0, step=0.25, key="est_weight")
+        ship_method = st.selectbox(
+            "Shipping method",
+            ["USPS Ground Advantage (est.)", "UPS Ground (est.)", "FedEx Ground (est.)", "Local pickup"],
+            key="ship_method_flip",
+        )
+        pack_cost = st.number_input("Packaging cost ($)", min_value=0.0, value=1.50, step=0.25, key="pack_cost_flip")
+        st.markdown("</div>", unsafe_allow_html=True)
+
     with c2:
-        wt = st.number_input("Estimated weight (lb)", min_value=0.0, value=2.0, step=0.25, key="rb_fc_wt")
-        ship_method_fc = st.selectbox("Shipping method", ["Ground (est.)", "USPS Priority (est.)", "Local pickup"], index=0, key="rb_fc_ship")
-    with c3:
-        ebay_pct_fc = st.number_input("eBay fee % (est.)", min_value=0.0, max_value=30.0, value=float(DEFAULT_EBAY_FEE_PCT), step=0.25, key="rb_fc_ebay")
-        proc_pct_fc = st.number_input("Processing % (est.)", min_value=0.0, max_value=10.0, value=float(DEFAULT_PROCESSING_PCT), step=0.1, key="rb_fc_proc")
-        proc_fixed_fc = st.number_input("Processing fixed ($)", min_value=0.0, max_value=2.0, value=float(DEFAULT_PROCESSING_FIXED), step=0.05, key="rb_fc_fixed")
+        st.markdown("<div class='section-card'>", unsafe_allow_html=True)
+        st.write("Your personal minimums (tune these over time).")
+        min_profit = st.number_input("Minimum profit ($)", min_value=0.0, value=25.00, step=1.00)
+        min_roi = st.number_input("Minimum ROI (%)", min_value=0.0, value=60.0, step=5.0)
+        fm: FeeModel = st.session_state.fee_model
+        ship = estimate_shipping(est_weight, ship_method)
 
-    pack_fc = st.number_input("Packaging cost ($)", min_value=0.0, max_value=20.0, value=float(DEFAULT_PACKAGING_COST), step=0.25, key="rb_fc_pack")
+        r = calc_profit(
+            sale_price=expected_sale,
+            cogs=deal_cost,
+            shipping_cost=ship,
+            packaging_cost=pack_cost,
+            fee_model=fm,
+        )
+        label, reason = flip_verdict(r["net_profit"], r["roi_pct"], min_profit, min_roi)
 
-    est_ship_fc = shipping_estimate(wt, ship_method_fc, pack_fc)
-    profit_fc, margin_fc, ebay_fee_fc, pay_fee_fc = profit_estimate(expected_sale, buy_price, est_ship_fc, ebay_pct_fc, proc_pct_fc, proc_fixed_fc)
-    status_txt, status_css = profit_status(profit_fc, margin_fc)
+        st.markdown("### Result")
+        if "YES" in label:
+            st.success(f"{label} — {reason}")
+        elif "MAYBE" in label:
+            st.warning(f"{label} — {reason}")
+        else:
+            st.error(f"{label} — {reason}")
 
-    # Decision rules for flip checker (simple, clear)
-    # YES: profit>=20 and margin>=20
-    # MAYBE: profit>=10 or margin>=12
-    # NO: otherwise
-    if profit_fc >= 20 and margin_fc >= 20:
-        decision = ("YES — BUY IT", "good")
-    elif profit_fc >= 10 or margin_fc >= 12:
-        decision = ("MAYBE — ONLY IF EASY", "mid")
-    else:
-        decision = ("NO — PASS", "bad")
+        st.markdown("---")
+        st.metric("Net profit", money(r["net_profit"]))
+        st.metric("ROI", f"{r['roi_pct']:.1f}%")
+        st.metric("Margin", f"{r['margin_pct']:.1f}%")
 
-    st.markdown(
-        f"""
-        <div class="card">
-          <h4>Decision</h4>
-          <div class="pill {decision[1]}"><b>{decision[0]}</b></div><br><br>
-          <div><b>Est. profit:</b> ${profit_fc:,.2f} &nbsp; • &nbsp; <b>Margin:</b> {margin_fc:.1f}%</div>
-          <div class="muted" style="margin-top:6px;">
-            Shipping+packaging: <b>${est_ship_fc:,.2f}</b> ({ship_method_fc})<br>
-            Fees: eBay <b>${ebay_fee_fc:,.2f}</b> + processing <b>${pay_fee_fc:,.2f}</b>
-          </div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
+        with st.expander("Breakdown", expanded=False):
+            st.write(f"Shipping estimate: **{money(ship)}** ({ship_method})")
+            st.write(f"Total fees: **{money(r['total_fees'])}**")
+            st.write(f"Total costs: **{money(r['total_costs'])}**")
 
-    be_fc = break_even_sale_price(buy_price, est_ship_fc, ebay_pct_fc, proc_pct_fc, proc_fixed_fc)
-    if be_fc is not None:
-        st.info(f"Break-even sale price (est.): **${be_fc:,.2f}**")
-    else:
-        st.warning("Your fee % settings are too high to compute a break-even price.")
+        st.markdown("</div>", unsafe_allow_html=True)
+
 
 # =============================
-# TAB 3 — How it works (Trust + clarity)
+# TAB 3 — Coming Soon (Soft Freemium Hook)
+# =============================
+with tab_soon:
+    st.subheader("🚀 Coming Soon")
+    st.write(
+        """
+This tool will always have a **free version**.
+
+For power users (serious flippers), we’re building features that save even more time:
+"""
+    )
+
+    st.markdown(
+        """
+### Planned “Pro” features (not live yet)
+- **Bulk Mode** — build listings for 5–20 items at once  
+- **Saved Listings** — come back to your drafts anytime  
+- **CSV Export** — track profit, ROI, and taxes  
+- **Smarter Pricing Insights** — fast sale vs max profit suggestions  
+
+### Early users get priority
+If you keep using this tool, you’ll be first in line when Pro features drop.
+"""
+    )
+
+    st.info("You’re on v1. Feedback helps decide what ships first.")
+
+
+# =============================
+# TAB 4 — Help
 # =============================
 with tab_help:
     st.subheader("How it works")
-    st.write(
+    st.markdown(
         """
-This tool helps you create fast listings and estimate real profit after:
-- platform fees (eBay final value estimate)
-- payment processing
-- shipping + packaging
+**What this app does**
+- Helps you draft clean, copy/paste listings for **eBay** and **Facebook Marketplace**
+- Estimates profit after:
+  - eBay fee %
+  - processing fee %
+  - processing fixed fee
+  - shipping estimate (offline-friendly)
+  - packaging cost
 
-**Quick usage**
-1) Fill out item info + features  
-2) Enter your cost + target price + weight  
-3) Copy the listing output into eBay or Facebook Marketplace  
+**Best workflow**
+1) Enter item details + features  
+2) Enter your cost + target sale price  
+3) Read the profit + ROI  
+4) Copy outputs into eBay / Facebook listing
 
-**For broken items**
-Use **For Parts/Repair** — the description automatically includes protection text to reduce headaches.
-
-**Note**
-All numbers are **estimates** (shipping and fees vary by item, category, and platform).
-        """
+**Owner tip (recommended for customers)**
+Set an environment variable `ADMIN_PIN` to hide the Settings panel.
+Without the PIN, customers won’t be able to change your branding/personalization.
+"""
     )
 
-st.caption(f"© {datetime.now().year} • {APP_NAME}")
-st.markdown("</div>", unsafe_allow_html=True)
+    st.caption("v1 is intentionally simple. The goal is speed + accuracy.")
+
+
+# =============================
+# Footer
+# =============================
+st.markdown("---")
+st.caption("Built for resellers who want profit clarity before they list.")
