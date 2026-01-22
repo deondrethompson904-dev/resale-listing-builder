@@ -402,7 +402,7 @@ header_cols = st.columns([0.12, 0.88], vertical_alignment="center")
 with header_cols[0]:
     if logo_src:
         try:
-            st.image(logo_src, width=64)
+            st.image(logo_src, width=120)
         except Exception:
             # fallback if URL fails
             st.markdown('<div class="tf-badge"><div class="tf-dot"></div></div>', unsafe_allow_html=True)
