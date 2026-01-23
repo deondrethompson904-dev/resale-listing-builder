@@ -2,7 +2,6 @@ import os
 import re
 import io
 import json
-import time
 import base64
 import pathlib
 import datetime as dt
@@ -41,11 +40,13 @@ DEFAULT_STATS = {
     "profit_checks": 0,
     "listings_generated": 0,
     "emails_captured": 0,
+    # v1.1 additions
+    "save_pro_clicks": 0,  # (kept for future when button is enabled)
 }
 
 
 # =========================
-# Helpers
+# Helpers: JSON + counters
 # =========================
 def _read_json(path: pathlib.Path, default: Dict[str, Any]) -> Dict[str, Any]:
     if not path.exists():
@@ -62,7 +63,6 @@ def _write_json(path: pathlib.Path, data: Dict[str, Any]) -> None:
 
 def load_config() -> Dict[str, Any]:
     cfg = _read_json(CONFIG_PATH, DEFAULT_CONFIG)
-    # Ensure keys exist
     for k, v in DEFAULT_CONFIG.items():
         cfg.setdefault(k, v)
     return cfg
@@ -95,13 +95,15 @@ def bump_stat(key: str, n: int = 1) -> None:
     save_stats(stats)
 
 
+# =========================
+# Helpers: waitlist
+# =========================
 def normalize_email(email: str) -> str:
-    return email.strip().lower()
+    return (email or "").strip().lower()
 
 
 def is_valid_email(email: str) -> bool:
     email = normalize_email(email)
-    # Simple, practical validation
     return bool(re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email))
 
 
@@ -110,12 +112,11 @@ def append_waitlist(email: str, source: str = "", note: str = "") -> Tuple[bool,
     if not is_valid_email(email):
         return False, "That doesn’t look like a valid email."
 
-    # Create file with headers if needed
     new_file = not WAITLIST_CSV.exists()
     if new_file:
         WAITLIST_CSV.write_text("timestamp_utc,email,source,note\n", encoding="utf-8")
 
-    # Prevent duplicates
+    # prevent duplicates
     existing = WAITLIST_CSV.read_text(encoding="utf-8", errors="ignore").splitlines()[1:]
     for line in existing:
         parts = line.split(",")
@@ -132,19 +133,24 @@ def append_waitlist(email: str, source: str = "", note: str = "") -> Tuple[bool,
     return True, "You’re on the waitlist ✅"
 
 
+# =========================
+# Helpers: query source tracking
+# =========================
 def get_query_source() -> str:
-    # e.g. add ?src=tiktok to your bio link
-    qp = st.query_params
-    src = ""
+    # Use ?src=tiktok in bio link: https://yourapp.streamlit.app/?src=tiktok
     try:
+        qp = st.query_params
         src = qp.get("src", "")
         if isinstance(src, list):
             src = src[0] if src else ""
+        return (src or "").strip().lower()
     except Exception:
-        pass
-    return (src or "").strip().lower()
+        return ""
 
 
+# =========================
+# Helpers: logo + styling
+# =========================
 def read_file_bytes(path: pathlib.Path) -> Optional[bytes]:
     try:
         if path.exists():
@@ -162,8 +168,8 @@ def bytes_to_data_url(img_bytes: bytes, mime: str) -> str:
 def get_logo_data_url() -> Optional[str]:
     """
     Priority:
-    1) LOGO_URL env var (remote or data URL)
-    2) uploaded override in data/logo_override.png
+    1) LOGO_URL env var (remote URL or data:image/...)
+    2) data/logo_override.png (owner upload)
     3) assets/logo.png
     4) assets/logo.svg
     """
@@ -181,7 +187,6 @@ def get_logo_data_url() -> Optional[str]:
 
     svg = read_file_bytes(ASSETS_DIR / "logo.svg")
     if svg:
-        # SVG as data URL
         b64 = base64.b64encode(svg).decode("utf-8")
         return f"data:image/svg+xml;base64,{b64}"
 
@@ -202,11 +207,6 @@ def inject_css(accent: str) -> None:
             margin-top:6px;
             margin-bottom:6px;
           }}
-          .app-logo {{
-            width:auto;
-            display:flex;
-            align-items:center;
-          }}
           .app-title {{
             font-size: 1.6rem;
             font-weight: 800;
@@ -217,33 +217,26 @@ def inject_css(accent: str) -> None:
             opacity: 0.8;
             font-size: 0.95rem;
           }}
-          .pill {{
-            display:inline-block;
-            border: 1px solid rgba(255,255,255,0.10);
-            padding: 6px 10px;
-            border-radius: 999px;
-            font-size: 0.85rem;
-            opacity: 0.9;
-          }}
-          .accent {{
-            color: var(--accent);
-          }}
-          .card {{
-            border: 1px solid rgba(255,255,255,0.08);
-            border-radius: 14px;
-            padding: 14px;
-            background: rgba(255,255,255,0.02);
-          }}
-          .small {{
-            font-size: 0.9rem;
-            opacity: 0.85;
-          }}
-          .muted {{
-            opacity: 0.75;
-          }}
           .divider {{
             margin: 12px 0;
             border-bottom: 1px solid rgba(255,255,255,0.08);
+          }}
+          .chip {{
+            display:inline-flex;
+            align-items:center;
+            gap:8px;
+            border:1px solid rgba(255,255,255,0.10);
+            border-radius:999px;
+            padding:6px 10px;
+            background: rgba(255,255,255,0.03);
+            font-size:0.9rem;
+          }}
+          .accent {{
+            color: var(--accent);
+            font-weight: 700;
+          }}
+          .muted {{
+            opacity: 0.75;
           }}
         </style>
         """,
@@ -258,7 +251,7 @@ def render_header(cfg: Dict[str, Any]) -> None:
     logo_html = ""
     if logo_url:
         logo_html = f"""
-        <div class="app-logo">
+        <div>
           <img src="{logo_url}" style="width:{size}px;height:{size}px;border-radius:14px;" />
         </div>
         """
@@ -311,9 +304,6 @@ def calc_profit(
 
 
 def shipping_estimate(method: str, weight_lb: float) -> float:
-    """
-    Simple offline-friendly estimate model (you can refine later).
-    """
     w = max(0.0, float(weight_lb))
     if method == "Ground (est.)":
         return 6.50 + 1.10 * w
@@ -324,6 +314,56 @@ def shipping_estimate(method: str, weight_lb: float) -> float:
     return 7.50 + 1.20 * w
 
 
+# =========================
+# v1.1: Flip Score
+# =========================
+def flip_score(profit: float, margin_pct: float, sale_price: float) -> float:
+    """
+    Simple, explainable score that feels smart without being complicated.
+    Returns 1.0 to 10.0
+    """
+    score = 5.0
+
+    # Profit points
+    if profit >= 25:
+        score += 2.0
+    if profit >= 50:
+        score += 3.0
+
+    # Margin points
+    if margin_pct >= 40:
+        score += 2.0
+    if margin_pct >= 60:
+        score += 3.0
+
+    # Penalties
+    if profit < 10:
+        score -= 3.0
+    if margin_pct < 20:
+        score -= 3.0
+
+    # Risk penalty (high ticket, low profit)
+    if sale_price > 200 and profit < 20:
+        score -= 2.0
+
+    # clamp
+    score = max(1.0, min(10.0, round(score, 1)))
+    return score
+
+
+def flip_badge(score: float) -> str:
+    if score <= 3:
+        return "❌ Bad Flip"
+    if score <= 6:
+        return "⚠️ Risky"
+    if score <= 8:
+        return "✅ Good Flip"
+    return "🔥 Great Flip"
+
+
+# =========================
+# Listing builder
+# =========================
 def build_listing_text(
     brand: str,
     item: str,
@@ -340,23 +380,16 @@ def build_listing_text(
     returns_line: str,
     include_parts_repair_note: bool,
 ) -> Dict[str, str]:
-    features = [ln.strip() for ln in features_lines.splitlines() if ln.strip()]
-    defects = [ln.strip() for ln in defects_lines.splitlines() if ln.strip()]
+    features = [ln.strip() for ln in (features_lines or "").splitlines() if ln.strip()]
+    defects = [ln.strip() for ln in (defects_lines or "").splitlines() if ln.strip()]
 
     title_parts = [brand.strip(), item.strip()]
     if model.strip():
         title_parts.append(model.strip())
-    title = " ".join([p for p in title_parts if p]).strip()
-    if not title:
-        title = "Item for sale"
+    title = " ".join([p for p in title_parts if p]).strip() or "Item for sale"
 
-    bullets = ""
-    if features:
-        bullets = "\n".join([f"- {x}" for x in features])
-
-    defects_bullets = ""
-    if defects:
-        defects_bullets = "\n".join([f"- {x}" for x in defects])
+    bullets = "\n".join([f"- {x}" for x in features]) if features else ""
+    defects_bullets = "\n".join([f"- {x}" for x in defects]) if defects else ""
 
     parts_repair = ""
     if include_parts_repair_note:
@@ -380,9 +413,9 @@ def build_listing_text(
     ebay_desc = f"""
 ## {title}
 
-{"### Key features\n" + bullets if bullets else ""}
+{("### Key features\n" + bullets) if bullets else ""}
 
-{"### Notes / defects\n" + defects_bullets if defects_bullets else ""}
+{("### Notes / defects\n" + defects_bullets) if defects_bullets else ""}
 
 {common_footer}
 {parts_repair}
@@ -409,7 +442,7 @@ Returns: {returns_line or "—"}
 
 
 # =========================
-# App
+# App boot
 # =========================
 st.set_page_config(
     page_title="Resale Listing Builder",
@@ -421,7 +454,7 @@ st.set_page_config(
 cfg = load_config()
 inject_css(cfg.get("accent_color", "#7C3AED"))
 
-# Session + source stats
+# Session + TikTok source stats (anonymous)
 if "session_bumped" not in st.session_state:
     bump_stat("sessions", 1)
     src = get_query_source()
@@ -432,13 +465,14 @@ if "session_bumped" not in st.session_state:
 # Owner mode
 ADMIN_PIN = os.getenv("ADMIN_PIN", "").strip()
 is_owner = False
+
 with st.sidebar:
     st.markdown("### 🔒 Owner Mode")
     st.caption("Tip: set `ADMIN_PIN` env var to hide admin tools from customers.")
     pin_input = st.text_input("Enter PIN", type="password", placeholder="Owner PIN")
     if ADMIN_PIN and pin_input and pin_input == ADMIN_PIN:
         is_owner = True
-        st.success("Owner mode enabled")
+        st.success("Owner mode enabled ✅")
 
     st.markdown("---")
     st.markdown("### ⚙️ Settings")
@@ -481,7 +515,6 @@ with st.sidebar:
         st.write(f"**Listings generated:** {stats.get('listings_generated', 0)}")
         st.write(f"**Emails captured:** {stats.get('emails_captured', 0)}")
 
-        # Download buttons
         st.download_button(
             "Download stats.json",
             data=json.dumps(stats, indent=2).encode("utf-8"),
@@ -489,6 +522,7 @@ with st.sidebar:
             mime="application/json",
             use_container_width=True,
         )
+
         if WAITLIST_CSV.exists():
             st.download_button(
                 "Download waitlist.csv",
@@ -498,23 +532,24 @@ with st.sidebar:
                 use_container_width=True,
             )
         else:
-            st.caption("No waitlist yet (waitlist.csv will appear after first signup).")
+            st.caption("No waitlist yet (waitlist.csv appears after first signup).")
 
     else:
-        # Customer sidebar: keep it simple and product-like (not customizable)
+        # Customer sidebar: keep product-like
         st.caption("Free tool. No login. Built for fast flips.")
-        st.markdown("**Tip:** Add `?src=tiktok` to your bio link to track TikTok traffic.")
+        st.markdown("**Pro tip:** keep your bio link as:")
+        st.code("https://YOUR_APP_URL/?src=tiktok", language=None)
         st.markdown("---")
         st.markdown("#### Get updates")
-        st.caption("Want early access to Pro features? Join the waitlist.")
+        st.caption("Want Bulk Mode + Saved Checks? Join the waitlist (optional).")
         email_side = st.text_input("Email", key="email_sidebar", placeholder="you@example.com")
         if st.button("Join waitlist", use_container_width=True):
             ok, msg = append_waitlist(email_side, source=get_query_source() or "app_sidebar", note="sidebar")
             (st.success(msg) if ok else st.warning(msg))
 
-# Main header
+# Header
 render_header(cfg)
-st.caption("Offline-friendly v1 • Generates listings + estimates profit (fees + shipping).")
+st.caption("Offline-friendly v1.1 • Listings + Profit + **Flip Score** (free).")
 
 # Tabs
 tabs = ["🧾 Listing Builder", "✅ Flip Checker", "🚀 Coming Soon"]
@@ -523,9 +558,10 @@ if cfg.get("show_how_it_works_tab", True):
 
 tab_objs = st.tabs(tabs)
 
-# -------------------------
+
+# =========================
 # Tab 1: Listing Builder
-# -------------------------
+# =========================
 with tab_objs[0]:
     left, right = st.columns([1.05, 0.95], gap="large")
 
@@ -620,7 +656,7 @@ with tab_objs[0]:
 
     st.markdown("---")
     st.markdown("### Get updates (optional)")
-    st.caption("Want Bulk Mode / Pro tools? Join the waitlist. No spam.")
+    st.caption("Want Bulk Mode / Saved Checks? Join the waitlist. No spam.")
     colw1, colw2 = st.columns([0.6, 0.4])
     with colw1:
         email_main = st.text_input("Email address", key="email_main", placeholder="you@example.com")
@@ -630,17 +666,19 @@ with tab_objs[0]:
             (st.success(msg) if ok else st.warning(msg))
 
 
-# -------------------------
-# Tab 2: Flip Checker
-# -------------------------
+# =========================
+# Tab 2: Flip Checker (v1.1 upgrade)
+# =========================
 with tab_objs[1]:
     st.markdown("### Flip Checker (profit after fees + shipping)")
+    st.caption("v1.1 adds **Flip Score** — a quick quality rating for the deal.")
 
     c1, c2, c3 = st.columns(3)
     with c1:
-        sale_price = st.number_input("Target sale price ($)", min_value=0.0, value=49.99, step=1.0)
-        cogs = st.number_input("Your cost (COGS) ($)", min_value=0.0, value=10.00, step=1.0)
+        sale_price = st.number_input("Target sale price ($)", min_value=0.0, value=79.99, step=1.0)
+        cogs = st.number_input("Your cost (COGS) ($)", min_value=0.0, value=25.00, step=1.0)
         weight = st.number_input("Estimated weight (lb)", min_value=0.0, value=2.0, step=0.25)
+
     with c2:
         shipping_method = st.selectbox("Shipping method", ["Ground (est.)", "Priority (est.)", "Local pickup"])
         packaging_cost = st.number_input("Packaging cost ($)", min_value=0.0, value=1.50, step=0.25)
@@ -650,6 +688,7 @@ with tab_objs[1]:
         else:
             shipping_cost = shipping_estimate(shipping_method, weight)
             st.caption(f"Estimated shipping: **{money(shipping_cost)}**")
+
     with c3:
         st.markdown("#### Fee defaults")
         ebay_fee_pct = st.number_input("eBay fee %", min_value=0.0, max_value=30.0, value=13.25, step=0.25)
@@ -659,6 +698,7 @@ with tab_objs[1]:
     st.markdown("---")
     if st.button("Calculate profit", type="primary"):
         bump_stat("profit_checks", 1)
+
         result = calc_profit(
             sale_price=sale_price,
             cogs=cogs,
@@ -668,19 +708,39 @@ with tab_objs[1]:
             shipping_cost=shipping_cost,
             packaging_cost=packaging_cost,
         )
-        st.session_state["last_profit"] = result
+
+        score = flip_score(result["profit"], result["margin_pct"], sale_price)
+        badge = flip_badge(score)
+
+        st.session_state["last_profit"] = {
+            **result,
+            "score": score,
+            "badge": badge,
+        }
 
     result = st.session_state.get("last_profit")
     if not result:
-        st.info("Click **Calculate profit** to log a check and get final numbers.")
+        st.info("Click **Calculate profit** to get numbers + Flip Score.")
     else:
-        profit = result["profit"]
-        margin = result["margin_pct"]
+        profit = float(result["profit"])
+        margin = float(result["margin_pct"])
+        score = float(result["score"])
+        badge = str(result["badge"])
 
-        top = st.columns(3)
+        top = st.columns(4)
         top[0].metric("Profit", money(profit))
         top[1].metric("Margin", f"{margin:.1f}%")
-        top[2].metric("Total fees", money(result["total_fees"]))
+        top[2].metric("Flip Score", f"{score} / 10")
+        top[3].metric("Verdict", badge)
+
+        if "Bad" in badge:
+            st.error("❌ I’d pass on this unless you can lower your cost or raise sale price.")
+        elif "Risky" in badge:
+            st.warning("⚠️ Tight margins — negotiate, reduce shipping, or increase sale price.")
+        elif "Good" in badge:
+            st.success("✅ Solid deal for most resellers.")
+        else:
+            st.success("🔥 Great deal — strong profit/margin combo.")
 
         st.markdown("#### Breakdown")
         b1, b2 = st.columns(2)
@@ -691,75 +751,71 @@ with tab_objs[1]:
             st.write(f"- Packaging: **{money(packaging_cost)}**")
         with b2:
             st.write(f"- COGS: **{money(cogs)}**")
+            st.write(f"- Total fees: **{money(result['total_fees'])}**")
             st.write(f"- Total cost (all-in): **{money(result['total_cost'])}**")
             st.write(f"- Sale price: **{money(sale_price)}**")
 
         st.markdown("---")
-        st.markdown("### Quick decision rule")
-        st.write("✅ **Buy** if profit and margin look strong for the time + risk.")
-        st.write("❌ **Pass** if fees + shipping crush the margin.")
+        st.markdown("### 💾 Save profit check")
+        st.button("Save this check (Pro)", disabled=True, use_container_width=True)
+        st.caption("Coming soon in Pro: saved checks, history, notes, and exports.")
 
 
-# -------------------------
-# Tab 3: Coming Soon + Waitlist (real)
-# -------------------------
+# =========================
+# Tab 3: Coming Soon + Waitlist (updated for Pro positioning)
+# =========================
 with tab_objs[2]:
     st.markdown("## 🚀 Coming Soon")
-    st.caption("This tool will always have a free version. Pro is for serious flippers.")
+    st.caption("The free version stays free. Pro is for serious flippers who want speed + tracking.")
 
-    st.markdown("### Planned “Pro” features (not live yet)")
+    st.markdown("### Planned Pro features (not live yet)")
     st.markdown(
         """
-- **Bulk Mode** — build listings for 5–20 items at once  
-- **Profit presets** — save platform fee profiles (eBay / FB / local)  
-- **Flip Score** — quick pass/buy rating based on margin + ROI  
-- **Inventory tracker** — cost, price, sold date, net profit  
-- **Export pack** — CSV exports for listings + bookkeeping  
+- 💾 **Saved Profit Checks** (history + notes per item)  
+- ⚡ **Bulk Mode** (check 5–20 items at once)  
+- 📦 **Inventory Tracker** (buy price, sold price, net profit)  
+- 📁 **CSV Exports** (taxes + bookkeeping)  
+- 🧠 **Smarter Flip Score** presets (time-to-sell vs max profit)  
         """.strip()
     )
 
     st.markdown("---")
     st.markdown("### Join the waitlist")
-    st.caption("Get early access + updates. No spam.")
+    st.caption("Early users get first access. No spam.")
     colx, coly = st.columns([0.7, 0.3])
     with colx:
         email_cs = st.text_input("Email", key="email_comingsoon", placeholder="you@example.com")
-        note_cs = st.text_input("What feature do you want most? (optional)", key="note_comingsoon", placeholder="Bulk mode, inventory, exports…")
+        note_cs = st.text_input("What feature do you want most? (optional)", key="note_comingsoon", placeholder="Saved checks, bulk mode, exports…")
     with coly:
         if st.button("Join waitlist", key="join_waitlist_cs", use_container_width=True):
             ok, msg = append_waitlist(email_cs, source=get_query_source() or "coming_soon", note=note_cs)
             (st.success(msg) if ok else st.warning(msg))
 
     st.markdown("---")
-    st.markdown("### Share link")
-    app_url_hint = "Tip: add **?src=tiktok** to your bio link so TikTok traffic gets counted."
-    st.info(app_url_hint)
+    st.info("Tracking tip: keep your TikTok bio link as `...?src=tiktok` so we can measure TikTok traffic.")
 
 
-# -------------------------
+# =========================
 # Tab 4: How it works
-# -------------------------
+# =========================
 if cfg.get("show_how_it_works_tab", True):
     with tab_objs[3]:
         st.markdown("## ℹ️ How it works")
         st.markdown(
             """
 ### What this app does
-- Helps you draft clean, copy/paste listings for **eBay** and **Facebook Marketplace**
-- Estimates profit after:
-  - eBay fee %
-  - processing %
-  - processing fixed fee
+- Drafts copy/paste listings for **eBay** + **Facebook Marketplace**
+- Calculates profit after:
+  - platform fee %
+  - processing fee %
   - shipping + packaging
 
-### Best way to use it (fast)
-1) Enter the item’s **target sale price** + your **cost**
-2) Estimate weight + shipping method  
-3) If profit doesn’t make sense → **don’t buy it**
+### v1.1 update
+- Added **Flip Score** (1–10) + verdict badge to make decisions faster.
 
 ### Privacy
 - No login required
-- Waitlist is **optional**
-- Stats are **anonymous counters** (no personal data)
+- Waitlist is optional
+- App tracking is anonymous counters only (no personal data)
             """.strip()
         )
