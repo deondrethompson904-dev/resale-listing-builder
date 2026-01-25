@@ -1,6 +1,5 @@
 import os
 import re
-import io
 import json
 import base64
 import pathlib
@@ -27,7 +26,7 @@ LOGO_OVERRIDE_PATH = DATA_DIR / "logo_override.png"
 DEFAULT_CONFIG = {
     "app_name": "Resale Listing Builder",
     "tagline": "List faster. Price smarter. Profit confidently.",
-    # New default accent: money-green (still owner-editable)
+    # Dark theme + money-green by default (owner can change)
     "accent_color": "#22C55E",
     "logo_size": 56,
     "show_how_it_works_tab": True,
@@ -197,43 +196,37 @@ def get_logo_data_url() -> Optional[str]:
 def inject_css(accent: str) -> None:
     """
     Dark theme, cleaner typography, consistent spacing, nicer inputs/buttons/tabs.
-    Keeps Streamlit structure unchanged.
+    Fix included: prevent iOS long-press selection from showing HTML inside header.
     """
     st.markdown(
         f"""
         <style>
-          /* ---- Base ---- */
           :root {{
             --accent: {accent};
             --bg: #0B0F14;
             --panel: #0F1620;
-            --panel2: #101A25;
             --card: rgba(255,255,255,0.04);
             --card2: rgba(255,255,255,0.06);
             --border: rgba(255,255,255,0.10);
             --border2: rgba(255,255,255,0.14);
             --text: rgba(255,255,255,0.92);
             --muted: rgba(255,255,255,0.70);
-            --muted2: rgba(255,255,255,0.58);
             --shadow: 0 10px 30px rgba(0,0,0,0.40);
             --radius: 16px;
             --radiusSm: 12px;
           }}
 
-          /* System font stack (offline-friendly) */
           html, body, [class*="css"] {{
             font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
             color: var(--text);
           }}
 
-          /* App background */
           .stApp {{
             background: radial-gradient(1200px 600px at 18% 0%, rgba(34,197,94,0.10), transparent 55%),
                         radial-gradient(900px 500px at 85% 10%, rgba(59,130,246,0.10), transparent 55%),
                         var(--bg);
           }}
 
-          /* Reduce top padding a bit */
           section.main > div.block-container {{
             padding-top: 1.1rem;
             padding-bottom: 2.4rem;
@@ -244,19 +237,6 @@ def inject_css(accent: str) -> None:
           [data-testid="stSidebar"] {{
             background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
             border-right: 1px solid var(--border);
-          }}
-          [data-testid="stSidebar"] .stMarkdown, 
-          [data-testid="stSidebar"] label,
-          [data-testid="stSidebar"] p {{
-            color: var(--text);
-          }}
-
-          /* Headings */
-          h1, h2, h3, h4 {{
-            letter-spacing: -0.02em;
-          }}
-          h3 {{
-            margin-bottom: 0.35rem;
           }}
 
           /* Inputs */
@@ -287,15 +267,10 @@ def inject_css(accent: str) -> None:
             background: rgba(255,255,255,0.07) !important;
             transform: translateY(-1px);
           }}
-
-          /* Primary button (Streamlit uses kind=primary) */
           div.stButton > button[kind="primary"] {{
             background: linear-gradient(180deg, rgba(34,197,94,0.95), rgba(34,197,94,0.80)) !important;
             border: 1px solid rgba(34,197,94,0.55) !important;
             color: #07110A !important;
-          }}
-          div.stButton > button[kind="primary"]:hover {{
-            filter: brightness(1.05);
           }}
 
           /* Tabs */
@@ -333,11 +308,6 @@ def inject_css(accent: str) -> None:
             border: 1px solid var(--border) !important;
             border-radius: var(--radius) !important;
             box-shadow: none !important;
-          }}
-
-          /* Markdown dividers */
-          hr {{
-            border-color: rgba(255,255,255,0.08) !important;
           }}
 
           /* Custom header */
@@ -397,7 +367,13 @@ def inject_css(accent: str) -> None:
             font-weight: 750;
           }}
 
-          /* Reduce Streamlit default "blue focus ring" harshness */
+          /* ✅ FIX: Prevent iOS long-press selection from exposing underlying HTML */
+          .app-header, .app-header * {{
+            -webkit-user-select: none;
+            user-select: none;
+            -webkit-touch-callout: none;
+          }}
+
           *:focus-visible {{
             outline: 2px solid rgba(34,197,94,0.35) !important;
             outline-offset: 2px !important;
@@ -412,7 +388,6 @@ def render_header(cfg: Dict[str, Any]) -> None:
     logo_url = get_logo_data_url()
     size = int(cfg.get("logo_size", 56))
 
-    logo_html = ""
     if logo_url:
         logo_html = f"""
         <div style="flex:0 0 auto;">
@@ -420,7 +395,6 @@ def render_header(cfg: Dict[str, Any]) -> None:
         </div>
         """
     else:
-        # clean fallback badge if no logo
         logo_html = f"""
         <div style="width:{size}px;height:{size}px;border-radius:14px;display:flex;align-items:center;justify-content:center;
                     border:1px solid rgba(255,255,255,0.10);background:rgba(255,255,255,0.04);font-weight:800;">
@@ -750,7 +724,11 @@ with tab_objs[0]:
             item = st.text_input("Item", placeholder="MacBook Pro, Drill, Sneakers, etc.")
             model = st.text_input("Model / Part # (optional)", placeholder="A1990, DCD791, etc.")
         with col2:
-            condition = st.selectbox("Condition", ["New", "Open box", "Used - Like New", "Used - Good", "Used - Fair", "Used - Fair", "For parts/repair"])
+            # ✅ FIX: remove duplicate "Used - Fair"
+            condition = st.selectbox(
+                "Condition",
+                ["New", "Open box", "Used - Like New", "Used - Good", "Used - Fair", "For parts/repair"],
+            )
             category = st.text_input("Category (optional)", placeholder="Electronics, Tools, Home, etc.")
             qty = st.number_input("Quantity", min_value=1, max_value=100, value=1, step=1)
 
