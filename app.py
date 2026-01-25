@@ -27,8 +27,9 @@ LOGO_OVERRIDE_PATH = DATA_DIR / "logo_override.png"
 DEFAULT_CONFIG = {
     "app_name": "Resale Listing Builder",
     "tagline": "List faster. Price smarter. Profit confidently.",
-    "accent_color": "#7C3AED",
-    "logo_size": 64,
+    # New default accent: money-green (still owner-editable)
+    "accent_color": "#22C55E",
+    "logo_size": 56,
     "show_how_it_works_tab": True,
 }
 
@@ -194,49 +195,212 @@ def get_logo_data_url() -> Optional[str]:
 
 
 def inject_css(accent: str) -> None:
+    """
+    Dark theme, cleaner typography, consistent spacing, nicer inputs/buttons/tabs.
+    Keeps Streamlit structure unchanged.
+    """
     st.markdown(
         f"""
         <style>
+          /* ---- Base ---- */
           :root {{
             --accent: {accent};
+            --bg: #0B0F14;
+            --panel: #0F1620;
+            --panel2: #101A25;
+            --card: rgba(255,255,255,0.04);
+            --card2: rgba(255,255,255,0.06);
+            --border: rgba(255,255,255,0.10);
+            --border2: rgba(255,255,255,0.14);
+            --text: rgba(255,255,255,0.92);
+            --muted: rgba(255,255,255,0.70);
+            --muted2: rgba(255,255,255,0.58);
+            --shadow: 0 10px 30px rgba(0,0,0,0.40);
+            --radius: 16px;
+            --radiusSm: 12px;
           }}
+
+          /* System font stack (offline-friendly) */
+          html, body, [class*="css"] {{
+            font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
+            color: var(--text);
+          }}
+
+          /* App background */
+          .stApp {{
+            background: radial-gradient(1200px 600px at 18% 0%, rgba(34,197,94,0.10), transparent 55%),
+                        radial-gradient(900px 500px at 85% 10%, rgba(59,130,246,0.10), transparent 55%),
+                        var(--bg);
+          }}
+
+          /* Reduce top padding a bit */
+          section.main > div.block-container {{
+            padding-top: 1.1rem;
+            padding-bottom: 2.4rem;
+            max-width: 1200px;
+          }}
+
+          /* Sidebar */
+          [data-testid="stSidebar"] {{
+            background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
+            border-right: 1px solid var(--border);
+          }}
+          [data-testid="stSidebar"] .stMarkdown, 
+          [data-testid="stSidebar"] label,
+          [data-testid="stSidebar"] p {{
+            color: var(--text);
+          }}
+
+          /* Headings */
+          h1, h2, h3, h4 {{
+            letter-spacing: -0.02em;
+          }}
+          h3 {{
+            margin-bottom: 0.35rem;
+          }}
+
+          /* Inputs */
+          .stTextInput > div > div > input,
+          .stNumberInput > div > div > input,
+          .stTextArea textarea {{
+            background: rgba(255,255,255,0.03) !important;
+            border: 1px solid var(--border) !important;
+            border-radius: var(--radiusSm) !important;
+          }}
+          .stSelectbox > div > div {{
+            background: rgba(255,255,255,0.03) !important;
+            border-radius: var(--radiusSm) !important;
+            border: 1px solid var(--border) !important;
+          }}
+
+          /* Buttons */
+          div.stButton > button {{
+            border-radius: 14px !important;
+            border: 1px solid var(--border2) !important;
+            background: rgba(255,255,255,0.05) !important;
+            color: var(--text) !important;
+            padding: 0.70rem 0.95rem !important;
+            font-weight: 650 !important;
+          }}
+          div.stButton > button:hover {{
+            border-color: rgba(255,255,255,0.22) !important;
+            background: rgba(255,255,255,0.07) !important;
+            transform: translateY(-1px);
+          }}
+
+          /* Primary button (Streamlit uses kind=primary) */
+          div.stButton > button[kind="primary"] {{
+            background: linear-gradient(180deg, rgba(34,197,94,0.95), rgba(34,197,94,0.80)) !important;
+            border: 1px solid rgba(34,197,94,0.55) !important;
+            color: #07110A !important;
+          }}
+          div.stButton > button[kind="primary"]:hover {{
+            filter: brightness(1.05);
+          }}
+
+          /* Tabs */
+          .stTabs [data-baseweb="tab-list"] {{
+            gap: 10px;
+            padding: 8px;
+            background: rgba(255,255,255,0.02);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+          }}
+          .stTabs [data-baseweb="tab"] {{
+            height: 44px;
+            border-radius: 12px;
+            padding-left: 14px;
+            padding-right: 14px;
+            color: var(--muted);
+          }}
+          .stTabs [aria-selected="true"] {{
+            background: rgba(255,255,255,0.06) !important;
+            color: var(--text) !important;
+            border: 1px solid rgba(255,255,255,0.10) !important;
+          }}
+
+          /* Metrics */
+          [data-testid="stMetric"] {{
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 14px 14px;
+          }}
+
+          /* Code blocks */
+          pre {{
+            background: rgba(255,255,255,0.03) !important;
+            border: 1px solid var(--border) !important;
+            border-radius: var(--radius) !important;
+            box-shadow: none !important;
+          }}
+
+          /* Markdown dividers */
+          hr {{
+            border-color: rgba(255,255,255,0.08) !important;
+          }}
+
+          /* Custom header */
           .app-header {{
             display:flex;
             align-items:center;
-            gap:14px;
-            margin-top:6px;
-            margin-bottom:6px;
+            justify-content:space-between;
+            gap: 16px;
+            margin-top: 6px;
+            margin-bottom: 14px;
+            padding: 14px 16px;
+            background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            box-shadow: var(--shadow);
+          }}
+          .app-left {{
+            display:flex;
+            align-items:center;
+            gap: 14px;
+            min-width: 0;
           }}
           .app-title {{
-            font-size: 1.6rem;
-            font-weight: 800;
+            font-size: 1.25rem;
+            font-weight: 820;
             line-height: 1.1;
+            margin: 0;
           }}
           .app-tagline {{
-            margin-top: 2px;
-            opacity: 0.8;
+            margin-top: 4px;
+            opacity: 0.85;
             font-size: 0.95rem;
+            color: var(--muted);
           }}
-          .divider {{
-            margin: 12px 0;
-            border-bottom: 1px solid rgba(255,255,255,0.08);
+          .chip-row {{
+            display:flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: flex-end;
           }}
           .chip {{
             display:inline-flex;
             align-items:center;
-            gap:8px;
-            border:1px solid rgba(255,255,255,0.10);
-            border-radius:999px;
-            padding:6px 10px;
+            gap: 8px;
+            border: 1px solid rgba(255,255,255,0.10);
+            border-radius: 999px;
+            padding: 6px 10px;
             background: rgba(255,255,255,0.03);
-            font-size:0.9rem;
+            font-size: 0.88rem;
+            color: var(--muted);
+          }}
+          .chip strong {{
+            color: var(--text);
           }}
           .accent {{
             color: var(--accent);
-            font-weight: 700;
+            font-weight: 750;
           }}
-          .muted {{
-            opacity: 0.75;
+
+          /* Reduce Streamlit default "blue focus ring" harshness */
+          *:focus-visible {{
+            outline: 2px solid rgba(34,197,94,0.35) !important;
+            outline-offset: 2px !important;
           }}
         </style>
         """,
@@ -246,29 +410,43 @@ def inject_css(accent: str) -> None:
 
 def render_header(cfg: Dict[str, Any]) -> None:
     logo_url = get_logo_data_url()
-    size = int(cfg.get("logo_size", 64))
+    size = int(cfg.get("logo_size", 56))
 
     logo_html = ""
     if logo_url:
         logo_html = f"""
-        <div>
-          <img src="{logo_url}" style="width:{size}px;height:{size}px;border-radius:14px;" />
+        <div style="flex:0 0 auto;">
+          <img src="{logo_url}" style="width:{size}px;height:{size}px;border-radius:14px; border:1px solid rgba(255,255,255,0.10);" />
+        </div>
+        """
+    else:
+        # clean fallback badge if no logo
+        logo_html = f"""
+        <div style="width:{size}px;height:{size}px;border-radius:14px;display:flex;align-items:center;justify-content:center;
+                    border:1px solid rgba(255,255,255,0.10);background:rgba(255,255,255,0.04);font-weight:800;">
+          🧾
         </div>
         """
 
     st.markdown(
         f"""
         <div class="app-header">
-          {logo_html}
-          <div>
-            <div class="app-title">{cfg.get("app_name","")}</div>
-            <div class="app-tagline">{cfg.get("tagline","")}</div>
+          <div class="app-left">
+            {logo_html}
+            <div style="min-width:0;">
+              <div class="app-title">{cfg.get("app_name","")}</div>
+              <div class="app-tagline">{cfg.get("tagline","")}</div>
+            </div>
+          </div>
+          <div class="chip-row">
+            <div class="chip">Offline-friendly <strong>v1.1</strong></div>
+            <div class="chip">No login</div>
+            <div class="chip">Flip Score <span class="accent">free</span></div>
           </div>
         </div>
         """,
         unsafe_allow_html=True,
     )
-    st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
 
 
 def money(x: float) -> str:
@@ -452,7 +630,7 @@ st.set_page_config(
 )
 
 cfg = load_config()
-inject_css(cfg.get("accent_color", "#7C3AED"))
+inject_css(cfg.get("accent_color", DEFAULT_CONFIG["accent_color"]))
 
 # Session + TikTok source stats (anonymous)
 if "session_bumped" not in st.session_state:
@@ -467,78 +645,77 @@ ADMIN_PIN = os.getenv("ADMIN_PIN", "").strip()
 is_owner = False
 
 with st.sidebar:
-    st.markdown("### 🔒 Owner Mode")
-    st.caption("Tip: set `ADMIN_PIN` env var to hide admin tools from customers.")
-    pin_input = st.text_input("Enter PIN", type="password", placeholder="Owner PIN")
-    if ADMIN_PIN and pin_input and pin_input == ADMIN_PIN:
-        is_owner = True
-        st.success("Owner mode enabled ✅")
+    st.markdown("### Control Panel")
 
-    st.markdown("---")
-    st.markdown("### ⚙️ Settings")
+    with st.expander("🔒 Owner Mode", expanded=False):
+        st.caption("Tip: set `ADMIN_PIN` env var to hide admin tools from customers.")
+        pin_input = st.text_input("Enter PIN", type="password", placeholder="Owner PIN")
+        if ADMIN_PIN and pin_input and pin_input == ADMIN_PIN:
+            is_owner = True
+            st.success("Owner mode enabled ✅")
 
     if is_owner:
-        st.markdown("#### Branding (Owner)")
-        cfg["app_name"] = st.text_input("App name", value=cfg.get("app_name", DEFAULT_CONFIG["app_name"]))
-        cfg["tagline"] = st.text_input("Tagline", value=cfg.get("tagline", DEFAULT_CONFIG["tagline"]))
-        cfg["accent_color"] = st.color_picker("Accent color", value=cfg.get("accent_color", DEFAULT_CONFIG["accent_color"]))
-        cfg["logo_size"] = st.slider("Logo size", min_value=40, max_value=120, value=int(cfg.get("logo_size", 64)), step=2)
-        cfg["show_how_it_works_tab"] = st.toggle("Show “How it works” tab", value=bool(cfg.get("show_how_it_works_tab", True)))
+        with st.expander("⚙️ Settings (Owner)", expanded=True):
+            st.markdown("#### Branding")
+            cfg["app_name"] = st.text_input("App name", value=cfg.get("app_name", DEFAULT_CONFIG["app_name"]))
+            cfg["tagline"] = st.text_input("Tagline", value=cfg.get("tagline", DEFAULT_CONFIG["tagline"]))
+            cfg["accent_color"] = st.color_picker("Accent color", value=cfg.get("accent_color", DEFAULT_CONFIG["accent_color"]))
+            cfg["logo_size"] = st.slider("Logo size", min_value=40, max_value=120, value=int(cfg.get("logo_size", 56)), step=2)
+            cfg["show_how_it_works_tab"] = st.toggle("Show “How it works” tab", value=bool(cfg.get("show_how_it_works_tab", True)))
 
-        st.caption("Logo options: set `LOGO_URL` env var, or place `assets/logo.png` / `assets/logo.svg`.")
-        uploaded = st.file_uploader("Upload logo (PNG)", type=["png"], help="Owner-only. Overrides other logo sources.")
-        if uploaded is not None:
-            try:
-                LOGO_OVERRIDE_PATH.write_bytes(uploaded.read())
-                st.success("Logo uploaded ✅ (saved to data/logo_override.png)")
-            except Exception as e:
-                st.error(f"Could not save logo: {e}")
+            st.caption("Logo options: set `LOGO_URL` env var, or place `assets/logo.png` / `assets/logo.svg`.")
+            uploaded = st.file_uploader("Upload logo (PNG)", type=["png"], help="Owner-only. Overrides other logo sources.")
+            if uploaded is not None:
+                try:
+                    LOGO_OVERRIDE_PATH.write_bytes(uploaded.read())
+                    st.success("Logo uploaded ✅ (saved to data/logo_override.png)")
+                except Exception as e:
+                    st.error(f"Could not save logo: {e}")
 
-        colA, colB = st.columns(2)
-        with colA:
-            if st.button("Save settings"):
-                save_config(cfg)
-                st.success("Saved ✅ Refreshing…")
-                st.rerun()
-        with colB:
-            if st.button("Reset defaults"):
-                save_config(DEFAULT_CONFIG)
-                st.warning("Reset. Refreshing…")
-                st.rerun()
+            colA, colB = st.columns(2)
+            with colA:
+                if st.button("Save settings", use_container_width=True):
+                    save_config(cfg)
+                    st.success("Saved ✅ Refreshing…")
+                    st.rerun()
+            with colB:
+                if st.button("Reset defaults", use_container_width=True):
+                    save_config(DEFAULT_CONFIG)
+                    st.warning("Reset. Refreshing…")
+                    st.rerun()
 
-        st.markdown("---")
-        st.markdown("#### Owner Dashboard")
-        stats = load_stats()
-        st.write(f"**Sessions:** {stats.get('sessions', 0)}")
-        st.write(f"**TikTok sessions:** {stats.get('tiktok_sessions', 0)}  *(use `?src=tiktok` in bio link)*")
-        st.write(f"**Profit checks:** {stats.get('profit_checks', 0)}")
-        st.write(f"**Listings generated:** {stats.get('listings_generated', 0)}")
-        st.write(f"**Emails captured:** {stats.get('emails_captured', 0)}")
+        with st.expander("📊 Owner Dashboard", expanded=False):
+            stats = load_stats()
+            st.write(f"**Sessions:** {stats.get('sessions', 0)}")
+            st.write(f"**TikTok sessions:** {stats.get('tiktok_sessions', 0)}  *(use `?src=tiktok` in bio link)*")
+            st.write(f"**Profit checks:** {stats.get('profit_checks', 0)}")
+            st.write(f"**Listings generated:** {stats.get('listings_generated', 0)}")
+            st.write(f"**Emails captured:** {stats.get('emails_captured', 0)}")
 
-        st.download_button(
-            "Download stats.json",
-            data=json.dumps(stats, indent=2).encode("utf-8"),
-            file_name="stats.json",
-            mime="application/json",
-            use_container_width=True,
-        )
-
-        if WAITLIST_CSV.exists():
             st.download_button(
-                "Download waitlist.csv",
-                data=WAITLIST_CSV.read_bytes(),
-                file_name="waitlist.csv",
-                mime="text/csv",
+                "Download stats.json",
+                data=json.dumps(stats, indent=2).encode("utf-8"),
+                file_name="stats.json",
+                mime="application/json",
                 use_container_width=True,
             )
-        else:
-            st.caption("No waitlist yet (waitlist.csv appears after first signup).")
+
+            if WAITLIST_CSV.exists():
+                st.download_button(
+                    "Download waitlist.csv",
+                    data=WAITLIST_CSV.read_bytes(),
+                    file_name="waitlist.csv",
+                    mime="text/csv",
+                    use_container_width=True,
+                )
+            else:
+                st.caption("No waitlist yet (waitlist.csv appears after first signup).")
 
     else:
-        # Customer sidebar: keep product-like
         st.caption("Free tool. No login. Built for fast flips.")
-        st.markdown("**Pro tip:** keep your bio link as:")
+        st.markdown("**Tracking tip:**")
         st.code("https://YOUR_APP_URL/?src=tiktok", language=None)
+
         st.markdown("---")
         st.markdown("#### Get updates")
         st.caption("Want Bulk Mode + Saved Checks? Join the waitlist (optional).")
@@ -549,7 +726,7 @@ with st.sidebar:
 
 # Header
 render_header(cfg)
-st.caption("Offline-friendly v1.1 • Listings + Profit + **Flip Score** (free).")
+st.caption("Listings + Profit + **Flip Score**. Dark mode by default. ✅")
 
 # Tabs
 tabs = ["🧾 Listing Builder", "✅ Flip Checker", "🚀 Coming Soon"]
@@ -573,7 +750,7 @@ with tab_objs[0]:
             item = st.text_input("Item", placeholder="MacBook Pro, Drill, Sneakers, etc.")
             model = st.text_input("Model / Part # (optional)", placeholder="A1990, DCD791, etc.")
         with col2:
-            condition = st.selectbox("Condition", ["New", "Open box", "Used - Like New", "Used - Good", "Used - Fair", "For parts/repair"])
+            condition = st.selectbox("Condition", ["New", "Open box", "Used - Like New", "Used - Good", "Used - Fair", "Used - Fair", "For parts/repair"])
             category = st.text_input("Category (optional)", placeholder="Electronics, Tools, Home, etc.")
             qty = st.number_input("Quantity", min_value=1, max_value=100, value=1, step=1)
 
@@ -758,15 +935,15 @@ with tab_objs[1]:
         st.markdown("---")
         st.markdown("### 💾 Save profit check")
         st.button("Save this check (Pro)", disabled=True, use_container_width=True)
-        st.caption("Coming soon in Pro: saved checks, history, notes, and exports.")
+        st.caption("Planned: saved checks, history, notes, and exports. (Not live yet.)")
 
 
 # =========================
-# Tab 3: Coming Soon + Waitlist (updated for Pro positioning)
+# Tab 3: Coming Soon + Waitlist
 # =========================
 with tab_objs[2]:
     st.markdown("## 🚀 Coming Soon")
-    st.caption("The free version stays free. Pro is for serious flippers who want speed + tracking.")
+    st.caption("Free stays free. Pro (later) is for speed + tracking — nothing is locked right now.")
 
     st.markdown("### Planned Pro features (not live yet)")
     st.markdown(
