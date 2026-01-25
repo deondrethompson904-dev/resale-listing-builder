@@ -145,7 +145,7 @@ def get_query_source() -> str:
 
 
 # =========================
-# Helpers: logo (no HTML header)
+# Helpers: logo
 # =========================
 def read_file_bytes(path: pathlib.Path) -> Optional[bytes]:
     try:
@@ -157,14 +157,6 @@ def read_file_bytes(path: pathlib.Path) -> Optional[bytes]:
 
 
 def get_logo_bytes_and_mime() -> Tuple[Optional[bytes], Optional[str]]:
-    """
-    Priority:
-    1) data/logo_override.png
-    2) assets/logo.png
-    3) assets/logo.svg (shown as image/svg+xml via data URL in markdown if needed, but we avoid HTML header)
-    4) None
-    NOTE: We intentionally do NOT embed custom HTML in the header to avoid iOS selection glitches.
-    """
     override = read_file_bytes(LOGO_OVERRIDE_PATH)
     if override:
         return override, "image/png"
@@ -173,8 +165,6 @@ def get_logo_bytes_and_mime() -> Tuple[Optional[bytes], Optional[str]]:
     if png:
         return png, "image/png"
 
-    # SVG is optional; Streamlit st.image supports svg in newer versions, but not always.
-    # We'll just skip it if present to keep this robust.
     return None, None
 
 
@@ -188,10 +178,12 @@ def inject_css(accent: str) -> None:
           :root {{
             --accent: {accent};
             --bg: #0B0F14;
-            --border: rgba(255,255,255,0.10);
-            --border2: rgba(255,255,255,0.14);
-            --text: rgba(255,255,255,0.92);
-            --muted: rgba(255,255,255,0.70);
+            --sidebar: #080C11; /* ✅ solid sidebar */
+            --sidebar2: #0A1017;
+            --border: rgba(255,255,255,0.12);
+            --border2: rgba(255,255,255,0.18);
+            --text: rgba(255,255,255,0.93);
+            --muted: rgba(255,255,255,0.74);
             --radius: 16px;
             --radiusSm: 12px;
           }}
@@ -213,11 +205,26 @@ def inject_css(accent: str) -> None:
             max-width: 1200px;
           }}
 
+          /* ✅ Sidebar: make it solid + readable */
           [data-testid="stSidebar"] {{
-            background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
-            border-right: 1px solid var(--border);
+            background: linear-gradient(180deg, var(--sidebar), var(--sidebar2)) !important;
+            border-right: 1px solid var(--border2) !important;
+          }}
+          [data-testid="stSidebar"] * {{
+            color: var(--text) !important;
+          }}
+          [data-testid="stSidebar"] .stCaption, 
+          [data-testid="stSidebar"] p {{
+            color: var(--muted) !important;
           }}
 
+          /* Sidebar code blocks */
+          [data-testid="stSidebar"] pre {{
+            background: rgba(255,255,255,0.06) !important;
+            border: 1px solid rgba(255,255,255,0.16) !important;
+          }}
+
+          /* Inputs */
           .stTextInput > div > div > input,
           .stNumberInput > div > div > input,
           .stTextArea textarea {{
@@ -231,6 +238,7 @@ def inject_css(accent: str) -> None:
             border: 1px solid var(--border) !important;
           }}
 
+          /* Buttons */
           div.stButton > button {{
             border-radius: 14px !important;
             border: 1px solid var(--border2) !important;
@@ -250,6 +258,7 @@ def inject_css(accent: str) -> None:
             color: #07110A !important;
           }}
 
+          /* Tabs */
           .stTabs [data-baseweb="tab-list"] {{
             gap: 10px;
             padding: 8px;
@@ -270,6 +279,7 @@ def inject_css(accent: str) -> None:
             border: 1px solid rgba(255,255,255,0.10) !important;
           }}
 
+          /* Metrics */
           [data-testid="stMetric"] {{
             background: rgba(255,255,255,0.03);
             border: 1px solid var(--border);
@@ -294,9 +304,6 @@ def inject_css(accent: str) -> None:
 
 
 def render_header_native(cfg: Dict[str, Any]) -> None:
-    """
-    Streamlit-native header: NO custom HTML, so iOS cannot show raw tags.
-    """
     logo_bytes, _mime = get_logo_bytes_and_mime()
     size = int(cfg.get("logo_size", 56))
 
@@ -363,9 +370,6 @@ def shipping_estimate(method: str, weight_lb: float) -> float:
     return 7.50 + 1.20 * w
 
 
-# =========================
-# v1.1: Flip Score
-# =========================
 def flip_score(profit: float, margin_pct: float, sale_price: float) -> float:
     score = 5.0
     if profit >= 25:
@@ -395,9 +399,6 @@ def flip_badge(score: float) -> str:
     return "🔥 Great Flip"
 
 
-# =========================
-# Listing builder
-# =========================
 def build_listing_text(
     brand: str,
     item: str,
@@ -488,14 +489,13 @@ st.set_page_config(
 cfg = load_config()
 inject_css(cfg.get("accent_color", DEFAULT_CONFIG["accent_color"]))
 
-# Session + TikTok source stats (anonymous)
+# Session stats
 if "session_bumped" not in st.session_state:
     bump_stat("sessions", 1)
     src = get_query_source()
     if src == "tiktok":
         bump_stat("tiktok_sessions", 1)
     st.session_state["session_bumped"] = True
-
 
 # Owner mode
 ADMIN_PIN = os.getenv("ADMIN_PIN", "").strip()
@@ -521,7 +521,6 @@ with st.sidebar:
         cfg["logo_size"] = st.slider("Logo size", 40, 120, value=int(cfg.get("logo_size", 56)), step=2)
         cfg["show_how_it_works_tab"] = st.toggle("Show “How it works” tab", value=bool(cfg.get("show_how_it_works_tab", True)))
 
-        st.caption("Logo options: set `LOGO_URL` (not used in header), or place `assets/logo.png`.")
         uploaded = st.file_uploader("Upload logo (PNG)", type=["png"], help="Owner-only. Overrides other logo sources.")
         if uploaded is not None:
             try:
@@ -584,10 +583,9 @@ with st.sidebar:
             (st.success(msg) if ok else st.warning(msg))
 
 
-# ✅ Header (native Streamlit, no HTML)
+# Header
 render_header_native(cfg)
 st.caption("Listings + Profit + **Flip Score**. Dark mode by default. ✅")
-
 
 # Tabs
 tabs = ["🧾 Listing Builder", "✅ Flip Checker", "🚀 Coming Soon"]
