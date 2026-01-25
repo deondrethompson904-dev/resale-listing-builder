@@ -26,8 +26,7 @@ LOGO_OVERRIDE_PATH = DATA_DIR / "logo_override.png"
 DEFAULT_CONFIG = {
     "app_name": "Resale Listing Builder",
     "tagline": "List faster. Price smarter. Profit confidently.",
-    # Dark theme + money-green by default (owner can change)
-    "accent_color": "#22C55E",
+    "accent_color": "#22C55E",  # money green default (owner can change)
     "logo_size": 56,
     "show_how_it_works_tab": True,
 }
@@ -40,8 +39,7 @@ DEFAULT_STATS = {
     "profit_checks": 0,
     "listings_generated": 0,
     "emails_captured": 0,
-    # v1.1 additions
-    "save_pro_clicks": 0,  # (kept for future when button is enabled)
+    "save_pro_clicks": 0,  # kept for future
 }
 
 
@@ -116,7 +114,6 @@ def append_waitlist(email: str, source: str = "", note: str = "") -> Tuple[bool,
     if new_file:
         WAITLIST_CSV.write_text("timestamp_utc,email,source,note\n", encoding="utf-8")
 
-    # prevent duplicates
     existing = WAITLIST_CSV.read_text(encoding="utf-8", errors="ignore").splitlines()[1:]
     for line in existing:
         parts = line.split(",")
@@ -137,7 +134,6 @@ def append_waitlist(email: str, source: str = "", note: str = "") -> Tuple[bool,
 # Helpers: query source tracking
 # =========================
 def get_query_source() -> str:
-    # Use ?src=tiktok in bio link: https://yourapp.streamlit.app/?src=tiktok
     try:
         qp = st.query_params
         src = qp.get("src", "")
@@ -149,7 +145,7 @@ def get_query_source() -> str:
 
 
 # =========================
-# Helpers: logo + styling
+# Helpers: logo (no HTML header)
 # =========================
 def read_file_bytes(path: pathlib.Path) -> Optional[bytes]:
     try:
@@ -160,58 +156,42 @@ def read_file_bytes(path: pathlib.Path) -> Optional[bytes]:
     return None
 
 
-def bytes_to_data_url(img_bytes: bytes, mime: str) -> str:
-    b64 = base64.b64encode(img_bytes).decode("utf-8")
-    return f"data:{mime};base64,{b64}"
-
-
-def get_logo_data_url() -> Optional[str]:
+def get_logo_bytes_and_mime() -> Tuple[Optional[bytes], Optional[str]]:
     """
     Priority:
-    1) LOGO_URL env var (remote URL or data:image/...)
-    2) data/logo_override.png (owner upload)
-    3) assets/logo.png
-    4) assets/logo.svg
+    1) data/logo_override.png
+    2) assets/logo.png
+    3) assets/logo.svg (shown as image/svg+xml via data URL in markdown if needed, but we avoid HTML header)
+    4) None
+    NOTE: We intentionally do NOT embed custom HTML in the header to avoid iOS selection glitches.
     """
-    env_logo = os.getenv("LOGO_URL", "").strip()
-    if env_logo:
-        return env_logo
-
     override = read_file_bytes(LOGO_OVERRIDE_PATH)
     if override:
-        return bytes_to_data_url(override, "image/png")
+        return override, "image/png"
 
     png = read_file_bytes(ASSETS_DIR / "logo.png")
     if png:
-        return bytes_to_data_url(png, "image/png")
+        return png, "image/png"
 
-    svg = read_file_bytes(ASSETS_DIR / "logo.svg")
-    if svg:
-        b64 = base64.b64encode(svg).decode("utf-8")
-        return f"data:image/svg+xml;base64,{b64}"
-
-    return None
+    # SVG is optional; Streamlit st.image supports svg in newer versions, but not always.
+    # We'll just skip it if present to keep this robust.
+    return None, None
 
 
+# =========================
+# Styling (dark theme)
+# =========================
 def inject_css(accent: str) -> None:
-    """
-    Dark theme, cleaner typography, consistent spacing, nicer inputs/buttons/tabs.
-    Fix included: prevent iOS long-press selection from showing HTML inside header.
-    """
     st.markdown(
         f"""
         <style>
           :root {{
             --accent: {accent};
             --bg: #0B0F14;
-            --panel: #0F1620;
-            --card: rgba(255,255,255,0.04);
-            --card2: rgba(255,255,255,0.06);
             --border: rgba(255,255,255,0.10);
             --border2: rgba(255,255,255,0.14);
             --text: rgba(255,255,255,0.92);
             --muted: rgba(255,255,255,0.70);
-            --shadow: 0 10px 30px rgba(0,0,0,0.40);
             --radius: 16px;
             --radiusSm: 12px;
           }}
@@ -233,13 +213,11 @@ def inject_css(accent: str) -> None:
             max-width: 1200px;
           }}
 
-          /* Sidebar */
           [data-testid="stSidebar"] {{
             background: linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01));
             border-right: 1px solid var(--border);
           }}
 
-          /* Inputs */
           .stTextInput > div > div > input,
           .stNumberInput > div > div > input,
           .stTextArea textarea {{
@@ -253,7 +231,6 @@ def inject_css(accent: str) -> None:
             border: 1px solid var(--border) !important;
           }}
 
-          /* Buttons */
           div.stButton > button {{
             border-radius: 14px !important;
             border: 1px solid var(--border2) !important;
@@ -273,7 +250,6 @@ def inject_css(accent: str) -> None:
             color: #07110A !important;
           }}
 
-          /* Tabs */
           .stTabs [data-baseweb="tab-list"] {{
             gap: 10px;
             padding: 8px;
@@ -294,7 +270,6 @@ def inject_css(accent: str) -> None:
             border: 1px solid rgba(255,255,255,0.10) !important;
           }}
 
-          /* Metrics */
           [data-testid="stMetric"] {{
             background: rgba(255,255,255,0.03);
             border: 1px solid var(--border);
@@ -302,7 +277,6 @@ def inject_css(accent: str) -> None:
             padding: 14px 14px;
           }}
 
-          /* Code blocks */
           pre {{
             background: rgba(255,255,255,0.03) !important;
             border: 1px solid var(--border) !important;
@@ -310,73 +284,8 @@ def inject_css(accent: str) -> None:
             box-shadow: none !important;
           }}
 
-          /* Custom header */
-          .app-header {{
-            display:flex;
-            align-items:center;
-            justify-content:space-between;
-            gap: 16px;
-            margin-top: 6px;
-            margin-bottom: 14px;
-            padding: 14px 16px;
-            background: linear-gradient(180deg, rgba(255,255,255,0.04), rgba(255,255,255,0.02));
-            border: 1px solid var(--border);
-            border-radius: var(--radius);
-            box-shadow: var(--shadow);
-          }}
-          .app-left {{
-            display:flex;
-            align-items:center;
-            gap: 14px;
-            min-width: 0;
-          }}
-          .app-title {{
-            font-size: 1.25rem;
-            font-weight: 820;
-            line-height: 1.1;
-            margin: 0;
-          }}
-          .app-tagline {{
-            margin-top: 4px;
-            opacity: 0.85;
-            font-size: 0.95rem;
-            color: var(--muted);
-          }}
-          .chip-row {{
-            display:flex;
-            gap: 10px;
-            flex-wrap: wrap;
-            justify-content: flex-end;
-          }}
-          .chip {{
-            display:inline-flex;
-            align-items:center;
-            gap: 8px;
-            border: 1px solid rgba(255,255,255,0.10);
-            border-radius: 999px;
-            padding: 6px 10px;
-            background: rgba(255,255,255,0.03);
-            font-size: 0.88rem;
-            color: var(--muted);
-          }}
-          .chip strong {{
-            color: var(--text);
-          }}
-          .accent {{
-            color: var(--accent);
-            font-weight: 750;
-          }}
-
-          /* ✅ FIX: Prevent iOS long-press selection from exposing underlying HTML */
-          .app-header, .app-header * {{
-            -webkit-user-select: none;
-            user-select: none;
-            -webkit-touch-callout: none;
-          }}
-
-          *:focus-visible {{
-            outline: 2px solid rgba(34,197,94,0.35) !important;
-            outline-offset: 2px !important;
+          hr {{
+            border-color: rgba(255,255,255,0.08) !important;
           }}
         </style>
         """,
@@ -384,43 +293,31 @@ def inject_css(accent: str) -> None:
     )
 
 
-def render_header(cfg: Dict[str, Any]) -> None:
-    logo_url = get_logo_data_url()
+def render_header_native(cfg: Dict[str, Any]) -> None:
+    """
+    Streamlit-native header: NO custom HTML, so iOS cannot show raw tags.
+    """
+    logo_bytes, _mime = get_logo_bytes_and_mime()
     size = int(cfg.get("logo_size", 56))
 
-    if logo_url:
-        logo_html = f"""
-        <div style="flex:0 0 auto;">
-          <img src="{logo_url}" style="width:{size}px;height:{size}px;border-radius:14px; border:1px solid rgba(255,255,255,0.10);" />
-        </div>
-        """
-    else:
-        logo_html = f"""
-        <div style="width:{size}px;height:{size}px;border-radius:14px;display:flex;align-items:center;justify-content:center;
-                    border:1px solid rgba(255,255,255,0.10);background:rgba(255,255,255,0.04);font-weight:800;">
-          🧾
-        </div>
-        """
+    c1, c2 = st.columns([0.72, 0.28], vertical_alignment="center")
 
-    st.markdown(
-        f"""
-        <div class="app-header">
-          <div class="app-left">
-            {logo_html}
-            <div style="min-width:0;">
-              <div class="app-title">{cfg.get("app_name","")}</div>
-              <div class="app-tagline">{cfg.get("tagline","")}</div>
-            </div>
-          </div>
-          <div class="chip-row">
-            <div class="chip">Offline-friendly <strong>v1.1</strong></div>
-            <div class="chip">No login</div>
-            <div class="chip">Flip Score <span class="accent">free</span></div>
-          </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    with c1:
+        left = st.columns([0.12, 0.88], vertical_alignment="center")
+        with left[0]:
+            if logo_bytes:
+                st.image(logo_bytes, width=size)
+            else:
+                st.markdown("### 🧾")
+        with left[1]:
+            st.markdown(f"## {cfg.get('app_name','Resale Listing Builder')}")
+            st.caption(cfg.get("tagline", ""))
+
+    with c2:
+        st.caption("Offline-friendly • v1.1")
+        st.caption("No login • Flip Score free ✅")
+
+    st.divider()
 
 
 def money(x: float) -> str:
@@ -470,37 +367,22 @@ def shipping_estimate(method: str, weight_lb: float) -> float:
 # v1.1: Flip Score
 # =========================
 def flip_score(profit: float, margin_pct: float, sale_price: float) -> float:
-    """
-    Simple, explainable score that feels smart without being complicated.
-    Returns 1.0 to 10.0
-    """
     score = 5.0
-
-    # Profit points
     if profit >= 25:
         score += 2.0
     if profit >= 50:
         score += 3.0
-
-    # Margin points
     if margin_pct >= 40:
         score += 2.0
     if margin_pct >= 60:
         score += 3.0
-
-    # Penalties
     if profit < 10:
         score -= 3.0
     if margin_pct < 20:
         score -= 3.0
-
-    # Risk penalty (high ticket, low profit)
     if sale_price > 200 and profit < 20:
         score -= 2.0
-
-    # clamp
-    score = max(1.0, min(10.0, round(score, 1)))
-    return score
+    return max(1.0, min(10.0, round(score, 1)))
 
 
 def flip_badge(score: float) -> str:
@@ -567,7 +449,7 @@ def build_listing_text(
 
 {("### Key features\n" + bullets) if bullets else ""}
 
-{("### Notes / defects\n" + defects_bullets) if defects_bullets else ""}
+{("### Notes / defects\n" + defects_bullets) if defects else ""}
 
 {common_footer}
 {parts_repair}
@@ -614,6 +496,7 @@ if "session_bumped" not in st.session_state:
         bump_stat("tiktok_sessions", 1)
     st.session_state["session_bumped"] = True
 
+
 # Owner mode
 ADMIN_PIN = os.getenv("ADMIN_PIN", "").strip()
 is_owner = False
@@ -628,62 +511,64 @@ with st.sidebar:
             is_owner = True
             st.success("Owner mode enabled ✅")
 
+    st.markdown("---")
+
     if is_owner:
-        with st.expander("⚙️ Settings (Owner)", expanded=True):
-            st.markdown("#### Branding")
-            cfg["app_name"] = st.text_input("App name", value=cfg.get("app_name", DEFAULT_CONFIG["app_name"]))
-            cfg["tagline"] = st.text_input("Tagline", value=cfg.get("tagline", DEFAULT_CONFIG["tagline"]))
-            cfg["accent_color"] = st.color_picker("Accent color", value=cfg.get("accent_color", DEFAULT_CONFIG["accent_color"]))
-            cfg["logo_size"] = st.slider("Logo size", min_value=40, max_value=120, value=int(cfg.get("logo_size", 56)), step=2)
-            cfg["show_how_it_works_tab"] = st.toggle("Show “How it works” tab", value=bool(cfg.get("show_how_it_works_tab", True)))
+        st.markdown("### ⚙️ Settings (Owner)")
+        cfg["app_name"] = st.text_input("App name", value=cfg.get("app_name", DEFAULT_CONFIG["app_name"]))
+        cfg["tagline"] = st.text_input("Tagline", value=cfg.get("tagline", DEFAULT_CONFIG["tagline"]))
+        cfg["accent_color"] = st.color_picker("Accent color", value=cfg.get("accent_color", DEFAULT_CONFIG["accent_color"]))
+        cfg["logo_size"] = st.slider("Logo size", 40, 120, value=int(cfg.get("logo_size", 56)), step=2)
+        cfg["show_how_it_works_tab"] = st.toggle("Show “How it works” tab", value=bool(cfg.get("show_how_it_works_tab", True)))
 
-            st.caption("Logo options: set `LOGO_URL` env var, or place `assets/logo.png` / `assets/logo.svg`.")
-            uploaded = st.file_uploader("Upload logo (PNG)", type=["png"], help="Owner-only. Overrides other logo sources.")
-            if uploaded is not None:
-                try:
-                    LOGO_OVERRIDE_PATH.write_bytes(uploaded.read())
-                    st.success("Logo uploaded ✅ (saved to data/logo_override.png)")
-                except Exception as e:
-                    st.error(f"Could not save logo: {e}")
+        st.caption("Logo options: set `LOGO_URL` (not used in header), or place `assets/logo.png`.")
+        uploaded = st.file_uploader("Upload logo (PNG)", type=["png"], help="Owner-only. Overrides other logo sources.")
+        if uploaded is not None:
+            try:
+                LOGO_OVERRIDE_PATH.write_bytes(uploaded.read())
+                st.success("Logo uploaded ✅ (saved to data/logo_override.png)")
+            except Exception as e:
+                st.error(f"Could not save logo: {e}")
 
-            colA, colB = st.columns(2)
-            with colA:
-                if st.button("Save settings", use_container_width=True):
-                    save_config(cfg)
-                    st.success("Saved ✅ Refreshing…")
-                    st.rerun()
-            with colB:
-                if st.button("Reset defaults", use_container_width=True):
-                    save_config(DEFAULT_CONFIG)
-                    st.warning("Reset. Refreshing…")
-                    st.rerun()
+        colA, colB = st.columns(2)
+        with colA:
+            if st.button("Save settings", use_container_width=True):
+                save_config(cfg)
+                st.success("Saved ✅ Refreshing…")
+                st.rerun()
+        with colB:
+            if st.button("Reset defaults", use_container_width=True):
+                save_config(DEFAULT_CONFIG)
+                st.warning("Reset. Refreshing…")
+                st.rerun()
 
-        with st.expander("📊 Owner Dashboard", expanded=False):
-            stats = load_stats()
-            st.write(f"**Sessions:** {stats.get('sessions', 0)}")
-            st.write(f"**TikTok sessions:** {stats.get('tiktok_sessions', 0)}  *(use `?src=tiktok` in bio link)*")
-            st.write(f"**Profit checks:** {stats.get('profit_checks', 0)}")
-            st.write(f"**Listings generated:** {stats.get('listings_generated', 0)}")
-            st.write(f"**Emails captured:** {stats.get('emails_captured', 0)}")
+        st.markdown("---")
+        st.markdown("### 📊 Owner Dashboard")
+        stats = load_stats()
+        st.write(f"**Sessions:** {stats.get('sessions', 0)}")
+        st.write(f"**TikTok sessions:** {stats.get('tiktok_sessions', 0)}  *(use `?src=tiktok`)*")
+        st.write(f"**Profit checks:** {stats.get('profit_checks', 0)}")
+        st.write(f"**Listings generated:** {stats.get('listings_generated', 0)}")
+        st.write(f"**Emails captured:** {stats.get('emails_captured', 0)}")
 
+        st.download_button(
+            "Download stats.json",
+            data=json.dumps(stats, indent=2).encode("utf-8"),
+            file_name="stats.json",
+            mime="application/json",
+            use_container_width=True,
+        )
+
+        if WAITLIST_CSV.exists():
             st.download_button(
-                "Download stats.json",
-                data=json.dumps(stats, indent=2).encode("utf-8"),
-                file_name="stats.json",
-                mime="application/json",
+                "Download waitlist.csv",
+                data=WAITLIST_CSV.read_bytes(),
+                file_name="waitlist.csv",
+                mime="text/csv",
                 use_container_width=True,
             )
-
-            if WAITLIST_CSV.exists():
-                st.download_button(
-                    "Download waitlist.csv",
-                    data=WAITLIST_CSV.read_bytes(),
-                    file_name="waitlist.csv",
-                    mime="text/csv",
-                    use_container_width=True,
-                )
-            else:
-                st.caption("No waitlist yet (waitlist.csv appears after first signup).")
+        else:
+            st.caption("No waitlist yet (waitlist.csv appears after first signup).")
 
     else:
         st.caption("Free tool. No login. Built for fast flips.")
@@ -698,9 +583,11 @@ with st.sidebar:
             ok, msg = append_waitlist(email_side, source=get_query_source() or "app_sidebar", note="sidebar")
             (st.success(msg) if ok else st.warning(msg))
 
-# Header
-render_header(cfg)
+
+# ✅ Header (native Streamlit, no HTML)
+render_header_native(cfg)
 st.caption("Listings + Profit + **Flip Score**. Dark mode by default. ✅")
+
 
 # Tabs
 tabs = ["🧾 Listing Builder", "✅ Flip Checker", "🚀 Coming Soon"]
@@ -724,7 +611,6 @@ with tab_objs[0]:
             item = st.text_input("Item", placeholder="MacBook Pro, Drill, Sneakers, etc.")
             model = st.text_input("Model / Part # (optional)", placeholder="A1990, DCD791, etc.")
         with col2:
-            # ✅ FIX: remove duplicate "Used - Fair"
             condition = st.selectbox(
                 "Condition",
                 ["New", "Open box", "Used - Like New", "Used - Good", "Used - Fair", "For parts/repair"],
@@ -822,7 +708,7 @@ with tab_objs[0]:
 
 
 # =========================
-# Tab 2: Flip Checker (v1.1 upgrade)
+# Tab 2: Flip Checker
 # =========================
 with tab_objs[1]:
     st.markdown("### Flip Checker (profit after fees + shipping)")
@@ -867,11 +753,7 @@ with tab_objs[1]:
         score = flip_score(result["profit"], result["margin_pct"], sale_price)
         badge = flip_badge(score)
 
-        st.session_state["last_profit"] = {
-            **result,
-            "score": score,
-            "badge": badge,
-        }
+        st.session_state["last_profit"] = {**result, "score": score, "badge": badge}
 
     result = st.session_state.get("last_profit")
     if not result:
@@ -889,7 +771,7 @@ with tab_objs[1]:
         top[3].metric("Verdict", badge)
 
         if "Bad" in badge:
-            st.error("❌ I’d pass on this unless you can lower your cost or raise sale price.")
+            st.error("❌ I’d pass unless you can lower cost or raise sale price.")
         elif "Risky" in badge:
             st.warning("⚠️ Tight margins — negotiate, reduce shipping, or increase sale price.")
         elif "Good" in badge:
@@ -917,7 +799,7 @@ with tab_objs[1]:
 
 
 # =========================
-# Tab 3: Coming Soon + Waitlist
+# Tab 3: Coming Soon
 # =========================
 with tab_objs[2]:
     st.markdown("## 🚀 Coming Soon")
