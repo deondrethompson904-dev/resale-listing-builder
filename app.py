@@ -2,9 +2,10 @@ import os
 import re
 import json
 import uuid
+import base64
 import pathlib
 import datetime as dt
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, List
 
 import streamlit as st
 import streamlit.components.v1 as components
@@ -86,7 +87,6 @@ def save_config(cfg: Dict[str, Any]) -> None:
 def load_stats() -> Dict[str, Any]:
     stats = _read_json(STATS_PATH, DEFAULT_STATS)
 
-    # backfill defaults (including nested dict)
     for k, v in DEFAULT_STATS.items():
         if k not in stats:
             stats[k] = v
@@ -175,6 +175,7 @@ def append_waitlist(email: str, source: str = "", note: str = "") -> Tuple[bool,
 # Helpers: query tracking (src + UTMs)
 # =========================
 def _qp_get(qp: Any, key: str) -> str:
+    """Compatible getter for Streamlit query params across versions."""
     try:
         val = qp.get(key, "")
         if isinstance(val, list):
@@ -205,6 +206,7 @@ def get_query_context() -> Dict[str, str]:
     raw = src or utm_source or ""
     traffic_source = raw if raw else "direct"
 
+    # Normalize common sources
     if traffic_source in ("tt", "tik", "tiktokapp"):
         traffic_source = "tiktok"
 
@@ -219,11 +221,7 @@ def get_query_context() -> Dict[str, str]:
 
 
 def is_tiktok_context(ctx: Dict[str, str]) -> bool:
-    return (
-        (ctx.get("src") == "tiktok")
-        or (ctx.get("utm_source") == "tiktok")
-        or (ctx.get("traffic_source") == "tiktok")
-    )
+    return (ctx.get("src") == "tiktok") or (ctx.get("utm_source") == "tiktok") or (ctx.get("traffic_source") == "tiktok")
 
 
 def source_bucket(traffic_source: str) -> str:
@@ -262,43 +260,57 @@ def get_logo_bytes_and_mime() -> Tuple[Optional[bytes], Optional[str]]:
     if png:
         return png, "image/png"
 
+    svg = read_file_bytes(ASSETS_DIR / "logo.svg")
+    if svg:
+        return svg, "image/svg+xml"
+
     return None, None
 
 
 # =========================
 # UI helpers
 # =========================
-def toast(msg: str) -> None:
-    # streamlit versions differ; keep safe
-    if hasattr(st, "toast"):
-        st.toast(msg)
-    else:
-        st.success(msg)
-
-
-def copy_to_clipboard_button(label: str, text: str, key: str) -> None:
-    if st.button(label, key=key, use_container_width=True):
-        # Use JS clipboard. Works on https contexts (Streamlit Cloud) + most mobile browsers.
-        payload = json.dumps(text)
-        components.html(
-            f"""
-            <script>
-              try {{
-                navigator.clipboard.writeText({payload});
-              }} catch (e) {{}}
-            </script>
-            """,
-            height=0,
-        )
-        toast("Copied ✅")
-
-
 def money(x: float) -> str:
     return f"${x:,.2f}"
 
 
+def toast(msg: str) -> None:
+    try:
+        if hasattr(st, "toast"):
+            st.toast(msg)
+        else:
+            st.success(msg)
+    except Exception:
+        st.success(msg)
+
+
+def _clipboard_js(text: str) -> str:
+    safe = json.dumps(text)
+    return f"""
+      <script>
+        (function() {{
+          try {{
+            navigator.clipboard.writeText({safe});
+          }} catch (e) {{}}
+        }})();
+      </script>
+    """
+
+
+def copy_btn(label: str, text: str, key: str) -> None:
+    if st.button(label, key=key, use_container_width=True):
+        components.html(_clipboard_js(text), height=0)
+        toast("Copied ✅")
+
+
+def card(title: str, body_fn) -> None:
+    st.markdown(f'<div class="tf-card"><div class="tf-card-title">{title}</div>', unsafe_allow_html=True)
+    body_fn()
+    st.markdown("</div>", unsafe_allow_html=True)
+
+
 # =========================
-# Styling (dark theme + Android/iOS readable)
+# Styling (dark theme + Android/iOS readable + visible control panel)
 # =========================
 def inject_css(accent: str) -> None:
     st.markdown(
@@ -307,14 +319,14 @@ def inject_css(accent: str) -> None:
           :root {{
             --accent: {accent};
             --bg: #0B0F14;
-            --sidebar: #080C11;
-            --sidebar2: #0A1017;
-            --card: rgba(255,255,255,0.03);
-            --card2: rgba(255,255,255,0.04);
-            --border: rgba(255,255,255,0.12);
-            --border2: rgba(255,255,255,0.18);
-            --text: #F3F4F6;      /* solid = more consistent on Android */
-            --muted: #C7CAD1;
+            --sidebar: #070A0F;
+            --sidebar2: #0A111A;
+            --card: rgba(255,255,255,0.04);
+            --card2: rgba(255,255,255,0.06);
+            --border: rgba(255,255,255,0.14);
+            --border2: rgba(255,255,255,0.20);
+            --text: #F3F4F6;      /* solid text helps Android */
+            --muted: #B6BAC4;
             --radius: 16px;
             --radiusSm: 12px;
           }}
@@ -325,21 +337,23 @@ def inject_css(accent: str) -> None:
           }}
 
           .stApp {{
-            background: radial-gradient(1200px 600px at 18% 0%, rgba(34,197,94,0.10), transparent 55%),
-                        radial-gradient(900px 500px at 85% 10%, rgba(59,130,246,0.10), transparent 55%),
-                        var(--bg);
+            background:
+              radial-gradient(1200px 600px at 18% 0%, rgba(34,197,94,0.10), transparent 55%),
+              radial-gradient(900px 500px at 85% 10%, rgba(59,130,246,0.10), transparent 55%),
+              var(--bg);
           }}
 
           section.main > div.block-container {{
-            padding-top: 1.1rem;
+            padding-top: 1.0rem;
             padding-bottom: 2.4rem;
             max-width: 1200px;
           }}
 
-          /* Sidebar: solid + readable */
+          /* Sidebar MUST be solid */
           [data-testid="stSidebar"] {{
             background: linear-gradient(180deg, var(--sidebar), var(--sidebar2)) !important;
             border-right: 1px solid var(--border2) !important;
+            opacity: 1 !important;
           }}
           [data-testid="stSidebar"] * {{
             color: var(--text) !important;
@@ -348,14 +362,9 @@ def inject_css(accent: str) -> None:
           [data-testid="stSidebar"] p {{
             color: var(--muted) !important;
           }}
-          [data-testid="stSidebar"] pre {{
-            background: rgba(255,255,255,0.06) !important;
-            border: 1px solid rgba(255,255,255,0.16) !important;
-          }}
 
-          /* Cross-device text enforcement (Android fixes) */
-          h1, h2, h3, h4, h5, h6,
-          p, li, label, span {{
+          /* Cross-device text enforcement */
+          h1, h2, h3, h4, h5, h6, p, li, label, span {{
             color: var(--text) !important;
           }}
           [data-testid="stMarkdownContainer"] * {{
@@ -364,21 +373,18 @@ def inject_css(accent: str) -> None:
           [data-testid="stCaptionContainer"] * {{
             color: var(--muted) !important;
           }}
-          .stTextInput label, .stTextArea label, .stNumberInput label, .stSelectbox label {{
-            color: rgba(255,255,255,0.88) !important;
-          }}
 
           /* Inputs */
           .stTextInput > div > div > input,
           .stNumberInput > div > div > input,
           .stTextArea textarea {{
-            background: rgba(255,255,255,0.03) !important;
+            background: rgba(255,255,255,0.04) !important;
             border: 1px solid var(--border) !important;
             border-radius: var(--radiusSm) !important;
             color: var(--text) !important;
           }}
           .stSelectbox > div > div {{
-            background: rgba(255,255,255,0.03) !important;
+            background: rgba(255,255,255,0.04) !important;
             border-radius: var(--radiusSm) !important;
             border: 1px solid var(--border) !important;
             color: var(--text) !important;
@@ -388,14 +394,14 @@ def inject_css(accent: str) -> None:
           div.stButton > button {{
             border-radius: 14px !important;
             border: 1px solid var(--border2) !important;
-            background: rgba(255,255,255,0.05) !important;
+            background: rgba(255,255,255,0.06) !important;
             color: var(--text) !important;
             padding: 0.70rem 0.95rem !important;
             font-weight: 650 !important;
           }}
           div.stButton > button:hover {{
-            border-color: rgba(255,255,255,0.22) !important;
-            background: rgba(255,255,255,0.07) !important;
+            border-color: rgba(255,255,255,0.26) !important;
+            background: rgba(255,255,255,0.08) !important;
             transform: translateY(-1px);
           }}
           div.stButton > button[kind="primary"] {{
@@ -408,7 +414,7 @@ def inject_css(accent: str) -> None:
           .stTabs [data-baseweb="tab-list"] {{
             gap: 10px;
             padding: 8px;
-            background: rgba(255,255,255,0.02);
+            background: rgba(255,255,255,0.03);
             border: 1px solid var(--border);
             border-radius: var(--radius);
           }}
@@ -420,14 +426,14 @@ def inject_css(accent: str) -> None:
             color: var(--muted) !important;
           }}
           .stTabs [aria-selected="true"] {{
-            background: rgba(255,255,255,0.06) !important;
+            background: rgba(255,255,255,0.08) !important;
             color: var(--text) !important;
-            border: 1px solid rgba(255,255,255,0.10) !important;
+            border: 1px solid rgba(255,255,255,0.12) !important;
           }}
 
           /* Metrics */
           [data-testid="stMetric"] {{
-            background: rgba(255,255,255,0.03);
+            background: rgba(255,255,255,0.04);
             border: 1px solid var(--border);
             border-radius: var(--radius);
             padding: 14px 14px;
@@ -436,9 +442,17 @@ def inject_css(accent: str) -> None:
             color: var(--text) !important;
           }}
 
+          /* Expander */
+          details {{
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 8px 10px;
+          }}
+
           /* Code blocks */
           pre {{
-            background: rgba(255,255,255,0.03) !important;
+            background: rgba(255,255,255,0.04) !important;
             border: 1px solid var(--border) !important;
             border-radius: var(--radius) !important;
             box-shadow: none !important;
@@ -455,15 +469,25 @@ def inject_css(accent: str) -> None:
             padding: 14px 14px;
             margin: 10px 0;
           }}
-          .tf-card h4 {{
-            margin: 0 0 8px 0;
+          .tf-card-title {{
+            font-weight: 800;
+            font-size: 1.05rem;
+            margin-bottom: 10px;
+          }}
+          .tf-pill {{
+            display:inline-block;
+            padding: 4px 10px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.06);
+            border: 1px solid rgba(255,255,255,0.14);
+            color: var(--muted);
+            font-size: 0.85rem;
           }}
 
           hr {{
-            border-color: rgba(255,255,255,0.08) !important;
+            border-color: rgba(255,255,255,0.10) !important;
           }}
 
-          /* Mobile tweaks */
           @media (max-width: 768px) {{
             section.main > div.block-container {{
               padding-top: 0.8rem;
@@ -478,7 +502,7 @@ def inject_css(accent: str) -> None:
 
 
 def render_header_native(cfg: Dict[str, Any]) -> None:
-    logo_bytes, _mime = get_logo_bytes_and_mime()
+    logo_bytes, mime = get_logo_bytes_and_mime()
     size = int(cfg.get("logo_size", 56))
 
     c1, c2 = st.columns([0.72, 0.28], vertical_alignment="center")
@@ -487,7 +511,11 @@ def render_header_native(cfg: Dict[str, Any]) -> None:
         left = st.columns([0.12, 0.88], vertical_alignment="center")
         with left[0]:
             if logo_bytes:
-                st.image(logo_bytes, width=size)
+                if mime == "image/svg+xml":
+                    # Streamlit can display svg bytes as image
+                    st.image(logo_bytes, width=size)
+                else:
+                    st.image(logo_bytes, width=size)
             else:
                 st.markdown("### 🧾")
         with left[1]:
@@ -495,8 +523,8 @@ def render_header_native(cfg: Dict[str, Any]) -> None:
             st.caption(cfg.get("tagline", ""))
 
     with c2:
-        st.caption("Offline-friendly • v1.2")
-        st.caption("No login • Flip Score free ✅")
+        st.caption("Offline-friendly • v1.3")
+        st.caption("No login • Dark mode ✅")
 
     st.divider()
 
@@ -569,7 +597,237 @@ def flip_badge(score: float) -> str:
     return "🔥 Great Flip"
 
 
-def build_listing_text(
+# =========================
+# Listing helpers (templates, titles, platforms)
+# =========================
+CONDITION_TEMPLATES = {
+    "New": "Brand new, unused. Ships fast.",
+    "Open box": "Open box item. Tested/inspected. Ships fast.",
+    "Used - Like New": "Lightly used. Clean and fully functional. Ships fast.",
+    "Used - Good": "Normal wear from use. Fully functional unless noted. Ships fast.",
+    "Used - Fair": "Noticeable wear. Fully functional unless noted. Please review photos/notes.",
+    "Used - Poor": "Heavy wear. May have issues. Please read notes carefully.",
+    "For parts/repair": "For parts/repair — sold as-is. May be missing parts or have issues not listed. No returns.",
+}
+
+PHOTO_CHECKLISTS = {
+    "Electronics": [
+        "Front & back",
+        "Screen close-up (if applicable)",
+        "Model/part number label",
+        "Ports & buttons",
+        "Power-on photo (if possible)",
+        "Accessories included",
+        "Any defects close-up",
+    ],
+    "Shoes/Clothing": [
+        "Front, sides, back",
+        "Size tag/label",
+        "Soles/bottoms",
+        "Stitching/inside",
+        "Brand/logo close-up",
+        "Any stains/tears close-up",
+    ],
+    "Tools": [
+        "Full tool front/back",
+        "Model/serial plate",
+        "Battery/charger (if included)",
+        "Bit/attachments (if included)",
+        "Power-on/operation (if possible)",
+        "Any cracks/damage close-up",
+    ],
+    "Home/Kitchen": [
+        "Front/back",
+        "Underside/markings",
+        "Measurements (if relevant)",
+        "Set pieces (if bundle)",
+        "Any chips/cracks close-up",
+    ],
+    "Toys/Games": [
+        "Front/back of box",
+        "Contents laid out",
+        "Piece/part count note (if known)",
+        "Close-ups of wear/tears",
+    ],
+    "Other": [
+        "Front/back",
+        "Brand/model label",
+        "Any included accessories",
+        "Any defects close-up",
+    ],
+}
+
+
+def _keywords_from_features(features_lines: str, max_k: int = 3) -> List[str]:
+    lines = [ln.strip() for ln in (features_lines or "").splitlines() if ln.strip()]
+    # Keep short keyword-ish lines
+    keep: List[str] = []
+    for ln in lines[:10]:
+        if len(ln) <= 28:
+            keep.append(ln)
+        if len(keep) >= max_k:
+            break
+    return keep
+
+
+def build_title_variants(
+    brand: str,
+    item: str,
+    model: str,
+    condition: str,
+    features_lines: str,
+    max_variants: int = 6,
+) -> List[str]:
+    b = (brand or "").strip()
+    it = (item or "").strip()
+    m = (model or "").strip()
+    cond = (condition or "").strip()
+    kws = _keywords_from_features(features_lines)
+
+    base_parts = [b, it, m]
+    base = " ".join([p for p in base_parts if p]).strip() or "Item for sale"
+
+    variants: List[str] = []
+    variants.append(base)
+    if m:
+        variants.append(" ".join([it, b, m]).strip())
+    if kws:
+        variants.append(" ".join([b, it, m, kws[0]]).strip())
+    if len(kws) >= 2:
+        variants.append(" ".join([b, it, kws[0], kws[1]]).strip())
+    if cond and cond != "For parts/repair":
+        variants.append(" ".join([b, it, m, cond]).strip())
+    if cond == "For parts/repair":
+        variants.append(" ".join([b, it, m, "For Parts/Repair"]).strip())
+
+    # Unique + trimmed
+    uniq = []
+    seen = set()
+    for v in variants:
+        v2 = re.sub(r"\s+", " ", v).strip()
+        if v2 and v2.lower() not in seen:
+            seen.add(v2.lower())
+            uniq.append(v2)
+        if len(uniq) >= max_variants:
+            break
+    return uniq
+
+
+def platform_description(
+    platform: str,
+    title: str,
+    condition: str,
+    category: str,
+    qty: int,
+    features: List[str],
+    defects: List[str],
+    seller_city: str,
+    pickup_line: str,
+    shipping_line: str,
+    handling_time: str,
+    returns_line: str,
+    parts_repair_note: str,
+) -> str:
+    platform = (platform or "").strip().lower()
+
+    feat_bul = "\n".join([f"- {x}" for x in features]) if features else ""
+    def_bul = "\n".join([f"- {x}" for x in defects]) if defects else ""
+
+    # eBay: markdown-ish
+    if platform == "ebay":
+        return f"""
+## {title}
+
+{("### Key features\n" + feat_bul) if feat_bul else ""}
+
+{("### Notes / defects\n" + def_bul) if def_bul else ""}
+
+**Condition:** {condition}
+**Quantity:** {qty}
+**Category:** {category or "—"}
+
+**Location:** {seller_city or "—"}
+**Pickup:** {pickup_line or "—"}
+**Shipping:** {shipping_line or "—"}
+**Handling time:** {handling_time or "—"}
+**Returns:** {returns_line or "—"}
+
+{parts_repair_note}
+""".strip()
+
+    # FB: simple readable
+    if platform == "facebook marketplace" or platform == "facebook":
+        lines = []
+        lines.append(title)
+        lines.append("")
+        lines.append(f"Condition: {condition}")
+        lines.append(f"Qty: {qty}")
+        if category:
+            lines.append(f"Category: {category}")
+        lines.append("")
+        if features:
+            lines.append("Features:")
+            lines.extend([f"• {x}" for x in features])
+            lines.append("")
+        if defects:
+            lines.append("Notes/defects:")
+            lines.extend([f"• {x}" for x in defects])
+            lines.append("")
+        lines.append(f"Pickup: {pickup_line or '—'}")
+        lines.append(f"Shipping: {shipping_line or '—'}")
+        lines.append(f"Location: {seller_city or '—'}")
+        lines.append(f"Returns: {returns_line or '—'}")
+        if parts_repair_note:
+            lines.append("")
+            lines.append(parts_repair_note.replace("**", ""))  # remove markdown emphasis
+        return "\n".join(lines).strip()
+
+    # Mercari: short + skimmable
+    if platform == "mercari":
+        lines = []
+        lines.append(title)
+        lines.append("")
+        if features:
+            lines.append("Details:")
+            lines.extend([f"- {x}" for x in features])
+            lines.append("")
+        if defects:
+            lines.append("Condition notes:")
+            lines.extend([f"- {x}" for x in defects])
+            lines.append("")
+        lines.append(f"Condition: {condition}")
+        if parts_repair_note:
+            lines.append(parts_repair_note.replace("**", ""))
+        return "\n".join(lines).strip()
+
+    # OfferUp: friendly + direct
+    if platform == "offerup":
+        lines = []
+        lines.append(title)
+        lines.append("")
+        lines.append(f"Condition: {condition}")
+        if features:
+            lines.append("")
+            lines.append("Highlights:")
+            lines.extend([f"• {x}" for x in features])
+        if defects:
+            lines.append("")
+            lines.append("Notes:")
+            lines.extend([f"• {x}" for x in defects])
+        lines.append("")
+        lines.append(f"Pickup: {pickup_line or '—'}")
+        lines.append(f"Location: {seller_city or '—'}")
+        if parts_repair_note:
+            lines.append("")
+            lines.append(parts_repair_note.replace("**", ""))
+        return "\n".join(lines).strip()
+
+    # fallback (generic)
+    return f"{title}\n\nCondition: {condition}\n\n{feat_bul}\n\n{def_bul}".strip()
+
+
+def build_listing_payload(
+    platform: str,
     brand: str,
     item: str,
     model: str,
@@ -584,66 +842,53 @@ def build_listing_text(
     handling_time: str,
     returns_line: str,
     include_parts_repair_note: bool,
-) -> Dict[str, str]:
+    use_condition_template: bool,
+) -> Dict[str, Any]:
     features = [ln.strip() for ln in (features_lines or "").splitlines() if ln.strip()]
     defects = [ln.strip() for ln in (defects_lines or "").splitlines() if ln.strip()]
 
-    title_parts = [brand.strip(), item.strip()]
-    if model.strip():
-        title_parts.append(model.strip())
-    title = " ".join([p for p in title_parts if p]).strip() or "Item for sale"
+    # Condition template
+    if use_condition_template and condition in CONDITION_TEMPLATES:
+        tmpl = CONDITION_TEMPLATES[condition]
+        # avoid duplicating if already included
+        if tmpl and tmpl not in defects:
+            defects = defects + [tmpl]
 
-    bullets = "\n".join([f"- {x}" for x in features]) if features else ""
-    defects_bullets = "\n".join([f"- {x}" for x in defects]) if defects else ""
+    title_variants = build_title_variants(brand, item, model, condition, features_lines, max_variants=6)
+    chosen_title = title_variants[0] if title_variants else "Item for sale"
 
-    parts_repair = ""
-    if include_parts_repair_note:
-        parts_repair = (
-            "\n\n**For parts/repair note:** This item may have issues not listed. "
-            "Please read the description and ask questions before purchase."
+    parts_repair_note = ""
+    if include_parts_repair_note and condition == "For parts/repair":
+        parts_repair_note = (
+            "**For parts/repair note:** Sold as-is for parts/repair. "
+            "May have issues not listed. Please ask questions before purchase."
         )
 
-    common_footer = f"""
-**Condition:** {condition}
-**Quantity:** {qty}
-**Category:** {category or "—"}
+    desc = platform_description(
+        platform=platform,
+        title=chosen_title,
+        condition=condition,
+        category=category,
+        qty=qty,
+        features=features,
+        defects=defects,
+        seller_city=seller_city,
+        pickup_line=pickup_line,
+        shipping_line=shipping_line,
+        handling_time=handling_time,
+        returns_line=returns_line,
+        parts_repair_note=parts_repair_note,
+    )
 
-**Location:** {seller_city or "—"}
-**Pickup:** {pickup_line or "—"}
-**Shipping:** {shipping_line or "—"}
-**Handling time:** {handling_time or "—"}
-**Returns:** {returns_line or "—"}
-""".strip()
-
-    ebay_desc = f"""
-## {title}
-
-{("### Key features\n" + bullets) if bullets else ""}
-
-{("### Notes / defects\n" + defects_bullets) if defects else ""}
-
-{common_footer}
-{parts_repair}
-""".strip()
-
-    fb_desc = f"""
-{title}
-
-Condition: {condition}
-Qty: {qty}
-{("Category: " + category) if category else ""}
-
-{("Features:\n" + "\n".join([f"• {x}" for x in features])) if features else ""}
-
-{("Notes/defects:\n" + "\n".join([f"• {x}" for x in defects])) if defects else ""}
-
-Pickup: {pickup_line or "—"}
-Shipping: {shipping_line or "—"}
-Location: {seller_city or "—"}
-Returns: {returns_line or "—"}
-""".strip()
-
-    return {"title": title, "ebay_desc": ebay_desc, "fb_desc": fb_desc}
+    return {
+        "platform": platform,
+        "title": chosen_title,
+        "title_variants": title_variants,
+        "desc": desc,
+        "features": features,
+        "defects": defects,
+        "parts_repair_note": parts_repair_note,
+    }
 
 
 # =========================
@@ -681,9 +926,9 @@ if "session_bumped" not in st.session_state:
     log_event("session_started", {"ctx": ctx})
     st.session_state["session_bumped"] = True
 
-# UI preferences (mobile-friendly)
+# UI preferences
 if "compact_mode" not in st.session_state:
-    st.session_state["compact_mode"] = True  # good default for phones
+    st.session_state["compact_mode"] = True
 
 
 # =========================
@@ -696,7 +941,7 @@ with st.sidebar:
     st.markdown("### Control Panel")
 
     st.toggle("Compact mode (better on phones)", key="compact_mode")
-    st.caption("Tip: compact mode collapses sections + reduces scrolling.")
+    st.caption("Compact mode collapses sections + reduces scrolling.")
 
     with st.expander("🔒 Owner Mode", expanded=False):
         st.caption("Tip: set `ADMIN_PIN` env var to hide admin tools from customers.")
@@ -753,12 +998,6 @@ with st.sidebar:
         cols[1].metric("Direct", int(sbs.get("direct", 0)))
         cols[2].metric("Other", int(sbs.get("other", 0)))
 
-        st.caption(
-            "Tip: Use UTM links like "
-            "`...?utm_source=tiktok&utm_medium=social&utm_campaign=organic` "
-            "so you can track by platform reliably."
-        )
-
         st.download_button(
             "Download stats.json",
             data=json.dumps(stats, indent=2).encode("utf-8"),
@@ -800,23 +1039,24 @@ with st.sidebar:
         st.caption("Want Bulk Mode + Saved Checks? Join the waitlist (optional).")
         email_side = st.text_input("Email", key="email_sidebar", placeholder="you@example.com")
         if st.button("Join waitlist", use_container_width=True):
-            ok, msg = append_waitlist(
-                email_side,
-                source=st.session_state.get("traffic_source", "unknown"),
-                note="sidebar",
-            )
+            ok, msg = append_waitlist(email_side, source=st.session_state.get("traffic_source", "unknown"), note="sidebar")
             (st.success(msg) if ok else st.warning(msg))
 
 
 # =========================
-# Header + Tabs
+# Header
 # =========================
 render_header_native(cfg)
 st.caption("Listings + Profit + **Flip Score**. Dark mode by default. ✅")
 
+
+# =========================
+# Tabs
+# =========================
 tabs = ["🧾 Listing Builder", "✅ Flip Checker", "🚀 Coming Soon"]
 if cfg.get("show_how_it_works_tab", True):
     tabs.append("ℹ️ How it works")
+
 tab_objs = st.tabs(tabs)
 
 
@@ -830,8 +1070,11 @@ with tab_objs[0]:
 
     with left:
         st.markdown("### Build your listing")
+        st.caption("Pick a platform, fill the basics, and generate clean copy/paste output.")
 
-        # Section 1
+        with st.expander("0) Platform", expanded=not compact):
+            platform = st.selectbox("Platform", ["eBay", "Facebook Marketplace", "Mercari", "OfferUp"])
+
         with st.expander("1) Item info", expanded=not compact):
             col1, col2 = st.columns(2)
             with col1:
@@ -843,23 +1086,47 @@ with tab_objs[0]:
                     "Condition",
                     ["New", "Open box", "Used - Like New", "Used - Good", "Used - Fair", "Used - Poor", "For parts/repair"],
                 )
-                category = st.text_input("Category (optional)", placeholder="Electronics, Tools, Home, etc.")
+                category = st.text_input("Category (optional)", placeholder="Electronics, Tools, Shoes, Home, etc.")
                 qty = st.number_input("Quantity", min_value=1, max_value=100, value=1, step=1)
 
-        # Section 2
         with st.expander("2) Features & notes", expanded=not compact):
-            features_lines = st.text_area(
-                "Key features (one per line)",
-                height=140 if not compact else 110,
-                placeholder="Example:\n16GB RAM\n512GB SSD\nIncludes charger",
-            )
-            defects_lines = st.text_area(
-                "Notes / defects (one per line)",
-                height=120 if not compact else 95,
-                placeholder="Example:\nSmall scratch on lid\nBattery service recommended\nNo original box",
-            )
+            colA, colB = st.columns([0.55, 0.45])
+            with colA:
+                features_lines = st.text_area(
+                    "Key features (one per line)",
+                    height=140 if not compact else 110,
+                    placeholder="Example:\n16GB RAM\n512GB SSD\nIncludes charger",
+                )
+                defects_lines = st.text_area(
+                    "Notes / defects (one per line)",
+                    height=120 if not compact else 95,
+                    placeholder="Example:\nSmall scratch on lid\nBattery service recommended\nNo original box",
+                )
+            with colB:
+                st.markdown("#### Quality helpers")
+                use_condition_template = st.toggle("Auto-add condition template text", value=True)
+                include_parts_repair_note = st.toggle("Extra protection text for parts/repair", value=True)
 
-        # Section 3
+                st.markdown("#### Photo checklist")
+                # pick checklist bucket
+                cat_lower = (category or "").lower()
+                if any(k in cat_lower for k in ["electronic", "laptop", "phone", "camera", "tablet", "console"]):
+                    bucket = "Electronics"
+                elif any(k in cat_lower for k in ["shoe", "sneaker", "shirt", "hoodie", "pants", "jacket"]):
+                    bucket = "Shoes/Clothing"
+                elif any(k in cat_lower for k in ["tool", "drill", "dewalt", "milwaukee", "saw"]):
+                    bucket = "Tools"
+                elif any(k in cat_lower for k in ["kitchen", "home", "decor", "plate", "mug", "bowl"]):
+                    bucket = "Home/Kitchen"
+                elif any(k in cat_lower for k in ["toy", "game", "puzzle", "lego"]):
+                    bucket = "Toys/Games"
+                else:
+                    bucket = "Other"
+
+                st.markdown(f'<span class="tf-pill">{bucket}</span>', unsafe_allow_html=True)
+                for it in PHOTO_CHECKLISTS[bucket]:
+                    st.write(f"- {it}")
+
         with st.expander("3) Seller profile (auto-added)", expanded=not compact):
             colA, colB = st.columns(2)
             with colA:
@@ -869,20 +1136,16 @@ with tab_objs[0]:
             with colB:
                 handling_time = st.text_input("Handling time", value="Same or next business day")
                 returns_line = st.text_input("Returns policy line", value="No returns (ask questions before buying)")
-                include_parts_repair_note = st.toggle("Auto-add “For parts/repair” protection text", value=True)
 
         st.markdown("---")
         generate = st.button("Generate listing text", type="primary", use_container_width=True)
 
-    with right:
-        st.markdown("### Output")
-        st.caption("Clean cards with Copy + Download.")
-
         if generate:
             bump_stat("listings_generated", 1)
-            log_event("listing_generated", {"category": category, "condition": condition})
+            log_event("listing_generated", {"platform": platform, "category": category, "condition": condition})
 
-            payload = build_listing_text(
+            payload = build_listing_payload(
+                platform=platform,
                 brand=brand,
                 item=item,
                 model=model,
@@ -897,63 +1160,87 @@ with tab_objs[0]:
                 handling_time=handling_time,
                 returns_line=returns_line,
                 include_parts_repair_note=include_parts_repair_note,
+                use_condition_template=use_condition_template,
             )
             st.session_state["last_listing"] = payload
+
+    with right:
+        st.markdown("### Output")
+        st.caption("Clean cards with one-tap copy (works great on phones).")
 
         payload = st.session_state.get("last_listing")
         if not payload:
             st.info("Fill out the item and click **Generate listing text**.")
         else:
-            # Card: Title
-            st.markdown('<div class="tf-card">', unsafe_allow_html=True)
-            st.markdown("#### Title")
-            st.text_area("title_out", value=payload["title"], height=70, label_visibility="collapsed")
-            c1, c2 = st.columns([0.55, 0.45])
-            with c1:
-                copy_to_clipboard_button("Copy title", payload["title"], key="copy_title_btn")
-            with c2:
-                st.download_button(
-                    "Download title (.txt)",
-                    data=(payload["title"] + "\n").encode("utf-8"),
-                    file_name="title.txt",
-                    mime="text/plain",
-                    use_container_width=True,
-                )
-            st.markdown("</div>", unsafe_allow_html=True)
+            # Allow selecting the best title
+            variants = payload.get("title_variants") or [payload.get("title", "Item for sale")]
+            selected = st.selectbox(
+                "Choose a title (optimizer)",
+                options=variants,
+                index=0,
+                help="Pick the best keyword order. Aim for ≤ 80 characters for eBay.",
+            )
+            payload["title"] = selected
+            # Rebuild description with selected title so all outputs match
+            # (Keeps platform consistent + updates title inside description)
+            # We'll use platform_description with existing parsed features/defects.
+            platform = payload.get("platform", "eBay")
+            desc = platform_description(
+                platform=platform,
+                title=payload["title"],
+                condition=condition,
+                category=category,
+                qty=int(qty),
+                features=payload.get("features", []),
+                defects=payload.get("defects", []),
+                seller_city=seller_city,
+                pickup_line=pickup_line,
+                shipping_line=shipping_line,
+                handling_time=handling_time,
+                returns_line=returns_line,
+                parts_repair_note=payload.get("parts_repair_note", ""),
+            )
+            payload["desc"] = desc
+            st.session_state["last_listing"] = payload
 
-            # Card: eBay
-            st.markdown('<div class="tf-card">', unsafe_allow_html=True)
-            st.markdown("#### eBay description")
-            st.text_area("ebay_out", value=payload["ebay_desc"], height=220 if not compact else 180, label_visibility="collapsed")
-            c1, c2 = st.columns([0.55, 0.45])
-            with c1:
-                copy_to_clipboard_button("Copy eBay description", payload["ebay_desc"], key="copy_ebay_btn")
-            with c2:
-                st.download_button(
-                    "Download eBay (.txt)",
-                    data=payload["ebay_desc"].encode("utf-8"),
-                    file_name="ebay_description.txt",
-                    mime="text/plain",
-                    use_container_width=True,
-                )
-            st.markdown("</div>", unsafe_allow_html=True)
+            title_len = len(payload["title"])
+            title_fit = "✅ Fits eBay (≤80)" if title_len <= 80 else "⚠️ Over 80 chars"
 
-            # Card: FB
-            st.markdown('<div class="tf-card">', unsafe_allow_html=True)
-            st.markdown("#### Facebook Marketplace description")
-            st.text_area("fb_out", value=payload["fb_desc"], height=190 if not compact else 155, label_visibility="collapsed")
-            c1, c2 = st.columns([0.55, 0.45])
-            with c1:
-                copy_to_clipboard_button("Copy FB description", payload["fb_desc"], key="copy_fb_btn")
-            with c2:
-                st.download_button(
-                    "Download FB (.txt)",
-                    data=payload["fb_desc"].encode("utf-8"),
-                    file_name="facebook_description.txt",
-                    mime="text/plain",
-                    use_container_width=True,
-                )
-            st.markdown("</div>", unsafe_allow_html=True)
+            def _title_card():
+                st.write(f"**Length:** {title_len} • {title_fit}")
+                st.text_area("title_out", value=payload["title"], height=80, label_visibility="collapsed")
+                c1, c2 = st.columns([0.55, 0.45])
+                with c1:
+                    copy_btn("Copy title", payload["title"], key="copy_title_btn")
+                with c2:
+                    st.download_button(
+                        "Download title (.txt)",
+                        data=(payload["title"] + "\n").encode("utf-8"),
+                        file_name="title.txt",
+                        mime="text/plain",
+                        use_container_width=True,
+                    )
+
+            def _desc_card():
+                st.text_area("desc_out", value=payload["desc"], height=260 if not compact else 210, label_visibility="collapsed")
+                c1, c2 = st.columns([0.55, 0.45])
+                with c1:
+                    copy_btn("Copy description", payload["desc"], key="copy_desc_btn")
+                with c2:
+                    st.download_button(
+                        "Download description (.txt)",
+                        data=payload["desc"].encode("utf-8"),
+                        file_name=f"{payload.get('platform','platform').replace(' ','_').lower()}_description.txt",
+                        mime="text/plain",
+                        use_container_width=True,
+                    )
+
+            card("Title", _title_card)
+            card(f"Description ({payload.get('platform','eBay')})", _desc_card)
+
+            st.markdown("---")
+            all_text = f"TITLE:\n{payload['title']}\n\nDESCRIPTION ({payload.get('platform','eBay')}):\n{payload['desc']}\n"
+            copy_btn("Copy ALL (title + description)", all_text, key="copy_all_listing_btn")
 
     st.markdown("---")
     st.markdown("### Get updates (optional)")
@@ -963,11 +1250,7 @@ with tab_objs[0]:
         email_main = st.text_input("Email address", key="email_main", placeholder="you@example.com")
     with colw2:
         if st.button("Join waitlist", key="join_waitlist_main", use_container_width=True):
-            ok, msg = append_waitlist(
-                email_main,
-                source=st.session_state.get("traffic_source", "unknown"),
-                note="main_footer",
-            )
+            ok, msg = append_waitlist(email_main, source=st.session_state.get("traffic_source", "unknown"), note="main_footer")
             (st.success(msg) if ok else st.warning(msg))
 
 
@@ -980,7 +1263,6 @@ with tab_objs[1]:
     st.markdown("### Flip Checker")
     st.caption("Cleaner flow: grouped inputs + quick presets + clear all-in summary.")
 
-    # Presets
     st.markdown("#### Quick presets")
     preset = st.selectbox(
         "Preset",
@@ -992,24 +1274,22 @@ with tab_objs[1]:
         ],
     )
 
-    # Defaults based on preset
     if preset == "Facebook Marketplace (no platform fee)":
-        preset_ebay_fee = 0.0
+        preset_platform_fee = 0.0
         preset_processing_pct = 2.9
         preset_processing_fixed = 0.30
         preset_ship_method = "Local pickup"
     elif preset == "Local pickup (no shipping)":
-        preset_ebay_fee = 13.25
+        preset_platform_fee = 13.25
         preset_processing_pct = 2.9
         preset_processing_fixed = 0.30
         preset_ship_method = "Local pickup"
     else:
-        preset_ebay_fee = 13.25
+        preset_platform_fee = 13.25
         preset_processing_pct = 2.9
         preset_processing_fixed = 0.30
         preset_ship_method = "Ground (est.)"
 
-    # Input groups
     with st.expander("1) Sale + cost", expanded=not compact):
         c1, c2, c3 = st.columns(3)
         with c1:
@@ -1041,11 +1321,11 @@ with tab_objs[1]:
     with st.expander("3) Fees", expanded=not compact):
         c1, c2, c3 = st.columns(3)
         with c1:
-            ebay_fee_pct = st.number_input(
+            platform_fee_pct = st.number_input(
                 "Platform fee %",
                 min_value=0.0,
                 max_value=30.0,
-                value=float(preset_ebay_fee) if preset != "Custom" else 13.25,
+                value=float(preset_platform_fee) if preset != "Custom" else 13.25,
                 step=0.25,
             )
         with c2:
@@ -1073,7 +1353,7 @@ with tab_objs[1]:
         result = calc_profit(
             sale_price=sale_price,
             cogs=cogs,
-            ebay_fee_pct=ebay_fee_pct,
+            ebay_fee_pct=platform_fee_pct,
             processing_pct=processing_pct,
             processing_fixed=processing_fixed,
             shipping_cost=shipping_cost,
@@ -1108,13 +1388,14 @@ with tab_objs[1]:
         top[2].metric("Flip Score", f"{score} / 10")
         top[3].metric("Verdict", badge)
 
-        all_in = float(result["total_cost"])
-        st.markdown('<div class="tf-card">', unsafe_allow_html=True)
-        st.markdown("#### Summary")
-        st.write(f"**All-in cost:** {money(all_in)}")
-        st.write(f"**Sale price:** {money(float(result['sale_price']))}")
-        st.write(f"**Profit:** {money(profit)}  •  **Margin:** {margin:.1f}%  •  **Score:** {score}/10")
-        st.markdown("</div>", unsafe_allow_html=True)
+        card(
+            "Summary",
+            lambda: (
+                st.write(f"**All-in cost:** {money(float(result['total_cost']))}"),
+                st.write(f"**Sale price:** {money(float(result['sale_price']))}"),
+                st.write(f"**Profit:** {money(profit)}  •  **Margin:** {margin:.1f}%  •  **Score:** {score}/10"),
+            ),
+        )
 
         if "Bad" in badge:
             st.error("❌ I’d pass unless you can lower cost or raise sale price.")
@@ -1167,11 +1448,7 @@ with tab_objs[2]:
     colx, coly = st.columns([0.7, 0.3])
     with colx:
         email_cs = st.text_input("Email", key="email_comingsoon", placeholder="you@example.com")
-        note_cs = st.text_input(
-            "What feature do you want most? (optional)",
-            key="note_comingsoon",
-            placeholder="Saved checks, bulk mode, exports…",
-        )
+        note_cs = st.text_input("What feature do you want most? (optional)", key="note_comingsoon", placeholder="Saved checks, bulk mode, exports…")
     with coly:
         if st.button("Join waitlist", key="join_waitlist_cs", use_container_width=True):
             ok, msg = append_waitlist(email_cs, source=st.session_state.get("traffic_source", "unknown"), note=note_cs)
@@ -1193,16 +1470,18 @@ if cfg.get("show_how_it_works_tab", True):
         st.markdown(
             """
 ### What this app does
-- Drafts copy/paste listings for **eBay** + **Facebook Marketplace**
+- Drafts copy/paste listings for **eBay**, **Facebook Marketplace**, **Mercari**, and **OfferUp**
 - Calculates profit after:
   - platform fee %
   - processing fee %
   - shipping + packaging
 
-### v1.2 update
-- Fixed TikTok tracking to support both `src=tiktok` and `utm_source=tiktok`
-- Added lightweight event logging for owner analytics
-- Cleaner UX: compact mode + output cards + better flip checker flow
+### v1.3 update
+- Cleaner UX: compact mode + output cards + copy buttons
+- Title optimizer (variants + 80-char helper)
+- Platform switch outputs
+- Condition templates + photo checklist
+- Android/iOS readability fixes + solid sidebar/control panel
 
 ### Privacy
 - No login required
