@@ -7,6 +7,7 @@ import datetime as dt
 from typing import Dict, Any, Optional, Tuple
 
 import streamlit as st
+import streamlit.components.v1 as components
 
 
 # =========================
@@ -265,7 +266,39 @@ def get_logo_bytes_and_mime() -> Tuple[Optional[bytes], Optional[str]]:
 
 
 # =========================
-# Styling (dark theme + cross-device readable text)
+# UI helpers
+# =========================
+def toast(msg: str) -> None:
+    # streamlit versions differ; keep safe
+    if hasattr(st, "toast"):
+        st.toast(msg)
+    else:
+        st.success(msg)
+
+
+def copy_to_clipboard_button(label: str, text: str, key: str) -> None:
+    if st.button(label, key=key, use_container_width=True):
+        # Use JS clipboard. Works on https contexts (Streamlit Cloud) + most mobile browsers.
+        payload = json.dumps(text)
+        components.html(
+            f"""
+            <script>
+              try {{
+                navigator.clipboard.writeText({payload});
+              }} catch (e) {{}}
+            </script>
+            """,
+            height=0,
+        )
+        toast("Copied ✅")
+
+
+def money(x: float) -> str:
+    return f"${x:,.2f}"
+
+
+# =========================
+# Styling (dark theme + Android/iOS readable)
 # =========================
 def inject_css(accent: str) -> None:
     st.markdown(
@@ -276,10 +309,12 @@ def inject_css(accent: str) -> None:
             --bg: #0B0F14;
             --sidebar: #080C11;
             --sidebar2: #0A1017;
+            --card: rgba(255,255,255,0.03);
+            --card2: rgba(255,255,255,0.04);
             --border: rgba(255,255,255,0.12);
             --border2: rgba(255,255,255,0.18);
-            --text: #F3F4F6;      /* ✅ more reliable on Android */
-            --muted: #C7CAD1;     /* ✅ more reliable on Android */
+            --text: #F3F4F6;      /* solid = more consistent on Android */
+            --muted: #C7CAD1;
             --radius: 16px;
             --radiusSm: 12px;
           }}
@@ -301,7 +336,7 @@ def inject_css(accent: str) -> None:
             max-width: 1200px;
           }}
 
-          /* ✅ Sidebar: solid + readable */
+          /* Sidebar: solid + readable */
           [data-testid="stSidebar"] {{
             background: linear-gradient(180deg, var(--sidebar), var(--sidebar2)) !important;
             border-right: 1px solid var(--border2) !important;
@@ -318,7 +353,7 @@ def inject_css(accent: str) -> None:
             border: 1px solid rgba(255,255,255,0.16) !important;
           }}
 
-          /* ✅ Cross-device text enforcement (fixes Android dark headings/labels) */
+          /* Cross-device text enforcement (Android fixes) */
           h1, h2, h3, h4, h5, h6,
           p, li, label, span {{
             color: var(--text) !important;
@@ -412,8 +447,29 @@ def inject_css(accent: str) -> None:
             color: var(--text) !important;
           }}
 
+          /* Card helper */
+          .tf-card {{
+            background: var(--card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 14px 14px;
+            margin: 10px 0;
+          }}
+          .tf-card h4 {{
+            margin: 0 0 8px 0;
+          }}
+
           hr {{
             border-color: rgba(255,255,255,0.08) !important;
+          }}
+
+          /* Mobile tweaks */
+          @media (max-width: 768px) {{
+            section.main > div.block-container {{
+              padding-top: 0.8rem;
+              padding-left: 0.8rem;
+              padding-right: 0.8rem;
+            }}
           }}
         </style>
         """,
@@ -443,10 +499,6 @@ def render_header_native(cfg: Dict[str, Any]) -> None:
         st.caption("No login • Flip Score free ✅")
 
     st.divider()
-
-
-def money(x: float) -> str:
-    return f"${x:,.2f}"
 
 
 # =========================
@@ -629,13 +681,22 @@ if "session_bumped" not in st.session_state:
     log_event("session_started", {"ctx": ctx})
     st.session_state["session_bumped"] = True
 
+# UI preferences (mobile-friendly)
+if "compact_mode" not in st.session_state:
+    st.session_state["compact_mode"] = True  # good default for phones
 
-# Owner mode
+
+# =========================
+# Sidebar
+# =========================
 ADMIN_PIN = os.getenv("ADMIN_PIN", "").strip()
 is_owner = False
 
 with st.sidebar:
     st.markdown("### Control Panel")
+
+    st.toggle("Compact mode (better on phones)", key="compact_mode")
+    st.caption("Tip: compact mode collapses sections + reduces scrolling.")
 
     with st.expander("🔒 Owner Mode", expanded=False):
         st.caption("Tip: set `ADMIN_PIN` env var to hide admin tools from customers.")
@@ -739,19 +800,23 @@ with st.sidebar:
         st.caption("Want Bulk Mode + Saved Checks? Join the waitlist (optional).")
         email_side = st.text_input("Email", key="email_sidebar", placeholder="you@example.com")
         if st.button("Join waitlist", use_container_width=True):
-            ok, msg = append_waitlist(email_side, source=st.session_state.get("traffic_source", "unknown"), note="sidebar")
+            ok, msg = append_waitlist(
+                email_side,
+                source=st.session_state.get("traffic_source", "unknown"),
+                note="sidebar",
+            )
             (st.success(msg) if ok else st.warning(msg))
 
 
-# Header
+# =========================
+# Header + Tabs
+# =========================
 render_header_native(cfg)
 st.caption("Listings + Profit + **Flip Score**. Dark mode by default. ✅")
 
-# Tabs
 tabs = ["🧾 Listing Builder", "✅ Flip Checker", "🚀 Coming Soon"]
 if cfg.get("show_how_it_works_tab", True):
     tabs.append("ℹ️ How it works")
-
 tab_objs = st.tabs(tabs)
 
 
@@ -759,52 +824,59 @@ tab_objs = st.tabs(tabs)
 # Tab 1: Listing Builder
 # =========================
 with tab_objs[0]:
+    compact = bool(st.session_state.get("compact_mode", True))
+
     left, right = st.columns([1.05, 0.95], gap="large")
 
     with left:
-        st.markdown("### 1) Item info")
-        col1, col2 = st.columns(2)
-        with col1:
-            brand = st.text_input("Brand", placeholder="Apple, DeWalt, Nike, etc.")
-            item = st.text_input("Item", placeholder="MacBook Pro, Drill, Sneakers, etc.")
-            model = st.text_input("Model / Part # (optional)", placeholder="A1990, DCD791, etc.")
-        with col2:
-            condition = st.selectbox(
-                "Condition",
-                ["New", "Open box", "Used - Like New", "Used - Good", "Used - Fair", "Used - Poor", "For parts/repair"],
+        st.markdown("### Build your listing")
+
+        # Section 1
+        with st.expander("1) Item info", expanded=not compact):
+            col1, col2 = st.columns(2)
+            with col1:
+                brand = st.text_input("Brand", placeholder="Apple, DeWalt, Nike, etc.")
+                item = st.text_input("Item", placeholder="MacBook Pro, Drill, Sneakers, etc.")
+                model = st.text_input("Model / Part # (optional)", placeholder="A1990, DCD791, etc.")
+            with col2:
+                condition = st.selectbox(
+                    "Condition",
+                    ["New", "Open box", "Used - Like New", "Used - Good", "Used - Fair", "Used - Poor", "For parts/repair"],
+                )
+                category = st.text_input("Category (optional)", placeholder="Electronics, Tools, Home, etc.")
+                qty = st.number_input("Quantity", min_value=1, max_value=100, value=1, step=1)
+
+        # Section 2
+        with st.expander("2) Features & notes", expanded=not compact):
+            features_lines = st.text_area(
+                "Key features (one per line)",
+                height=140 if not compact else 110,
+                placeholder="Example:\n16GB RAM\n512GB SSD\nIncludes charger",
             )
-            category = st.text_input("Category (optional)", placeholder="Electronics, Tools, Home, etc.")
-            qty = st.number_input("Quantity", min_value=1, max_value=100, value=1, step=1)
+            defects_lines = st.text_area(
+                "Notes / defects (one per line)",
+                height=120 if not compact else 95,
+                placeholder="Example:\nSmall scratch on lid\nBattery service recommended\nNo original box",
+            )
 
-        st.markdown("### 2) Features & notes")
-        features_lines = st.text_area(
-            "Key features (one per line)",
-            height=140,
-            placeholder="Example:\n16GB RAM\n512GB SSD\nIncludes charger",
-        )
-        defects_lines = st.text_area(
-            "Notes / defects (one per line)",
-            height=120,
-            placeholder="Example:\nSmall scratch on lid\nBattery service recommended\nNo original box",
-        )
-
-        st.markdown("### 3) Seller profile (auto-added)")
-        colA, colB = st.columns(2)
-        with colA:
-            seller_city = st.text_input("City/Area", value="Jacksonville, FL")
-            pickup_line = st.text_input("Pickup line", value="Porch pickup / meetup")
-            shipping_line = st.text_input("Shipping line", value="Ships within the US")
-        with colB:
-            handling_time = st.text_input("Handling time", value="Same or next business day")
-            returns_line = st.text_input("Returns policy line", value="No returns (ask questions before buying)")
-            include_parts_repair_note = st.toggle("Auto-add “For parts/repair” protection text", value=True)
+        # Section 3
+        with st.expander("3) Seller profile (auto-added)", expanded=not compact):
+            colA, colB = st.columns(2)
+            with colA:
+                seller_city = st.text_input("City/Area", value="Jacksonville, FL")
+                pickup_line = st.text_input("Pickup line", value="Porch pickup / meetup")
+                shipping_line = st.text_input("Shipping line", value="Ships within the US")
+            with colB:
+                handling_time = st.text_input("Handling time", value="Same or next business day")
+                returns_line = st.text_input("Returns policy line", value="No returns (ask questions before buying)")
+                include_parts_repair_note = st.toggle("Auto-add “For parts/repair” protection text", value=True)
 
         st.markdown("---")
         generate = st.button("Generate listing text", type="primary", use_container_width=True)
 
     with right:
         st.markdown("### Output")
-        st.caption("Copy/paste into eBay or Facebook Marketplace.")
+        st.caption("Clean cards with Copy + Download.")
 
         if generate:
             bump_stat("listings_generated", 1)
@@ -832,28 +904,56 @@ with tab_objs[0]:
         if not payload:
             st.info("Fill out the item and click **Generate listing text**.")
         else:
+            # Card: Title
+            st.markdown('<div class="tf-card">', unsafe_allow_html=True)
             st.markdown("#### Title")
-            st.code(payload["title"], language=None)
+            st.text_area("title_out", value=payload["title"], height=70, label_visibility="collapsed")
+            c1, c2 = st.columns([0.55, 0.45])
+            with c1:
+                copy_to_clipboard_button("Copy title", payload["title"], key="copy_title_btn")
+            with c2:
+                st.download_button(
+                    "Download title (.txt)",
+                    data=(payload["title"] + "\n").encode("utf-8"),
+                    file_name="title.txt",
+                    mime="text/plain",
+                    use_container_width=True,
+                )
+            st.markdown("</div>", unsafe_allow_html=True)
 
+            # Card: eBay
+            st.markdown('<div class="tf-card">', unsafe_allow_html=True)
             st.markdown("#### eBay description")
-            st.code(payload["ebay_desc"], language="markdown")
-            st.download_button(
-                "Download eBay description (.txt)",
-                data=payload["ebay_desc"].encode("utf-8"),
-                file_name="ebay_description.txt",
-                mime="text/plain",
-                use_container_width=True,
-            )
+            st.text_area("ebay_out", value=payload["ebay_desc"], height=220 if not compact else 180, label_visibility="collapsed")
+            c1, c2 = st.columns([0.55, 0.45])
+            with c1:
+                copy_to_clipboard_button("Copy eBay description", payload["ebay_desc"], key="copy_ebay_btn")
+            with c2:
+                st.download_button(
+                    "Download eBay (.txt)",
+                    data=payload["ebay_desc"].encode("utf-8"),
+                    file_name="ebay_description.txt",
+                    mime="text/plain",
+                    use_container_width=True,
+                )
+            st.markdown("</div>", unsafe_allow_html=True)
 
+            # Card: FB
+            st.markdown('<div class="tf-card">', unsafe_allow_html=True)
             st.markdown("#### Facebook Marketplace description")
-            st.code(payload["fb_desc"], language=None)
-            st.download_button(
-                "Download FB description (.txt)",
-                data=payload["fb_desc"].encode("utf-8"),
-                file_name="facebook_description.txt",
-                mime="text/plain",
-                use_container_width=True,
-            )
+            st.text_area("fb_out", value=payload["fb_desc"], height=190 if not compact else 155, label_visibility="collapsed")
+            c1, c2 = st.columns([0.55, 0.45])
+            with c1:
+                copy_to_clipboard_button("Copy FB description", payload["fb_desc"], key="copy_fb_btn")
+            with c2:
+                st.download_button(
+                    "Download FB (.txt)",
+                    data=payload["fb_desc"].encode("utf-8"),
+                    file_name="facebook_description.txt",
+                    mime="text/plain",
+                    use_container_width=True,
+                )
+            st.markdown("</div>", unsafe_allow_html=True)
 
     st.markdown("---")
     st.markdown("### Get updates (optional)")
@@ -863,7 +963,11 @@ with tab_objs[0]:
         email_main = st.text_input("Email address", key="email_main", placeholder="you@example.com")
     with colw2:
         if st.button("Join waitlist", key="join_waitlist_main", use_container_width=True):
-            ok, msg = append_waitlist(email_main, source=st.session_state.get("traffic_source", "unknown"), note="main_footer")
+            ok, msg = append_waitlist(
+                email_main,
+                source=st.session_state.get("traffic_source", "unknown"),
+                note="main_footer",
+            )
             (st.success(msg) if ok else st.warning(msg))
 
 
@@ -871,35 +975,100 @@ with tab_objs[0]:
 # Tab 2: Flip Checker
 # =========================
 with tab_objs[1]:
-    st.markdown("### Flip Checker (profit after fees + shipping)")
-    st.caption("v1.2 adds better traffic tracking + event logs for owner analytics.")
+    compact = bool(st.session_state.get("compact_mode", True))
 
-    c1, c2, c3 = st.columns(3)
-    with c1:
-        sale_price = st.number_input("Target sale price ($)", min_value=0.0, value=79.99, step=1.0)
-        cogs = st.number_input("Your cost (COGS) ($)", min_value=0.0, value=25.00, step=1.0)
-        weight = st.number_input("Estimated weight (lb)", min_value=0.0, value=2.0, step=0.25)
+    st.markdown("### Flip Checker")
+    st.caption("Cleaner flow: grouped inputs + quick presets + clear all-in summary.")
 
-    with c2:
-        shipping_method = st.selectbox("Shipping method", ["Ground (est.)", "Priority (est.)", "Local pickup"])
-        packaging_cost = st.number_input("Packaging cost ($)", min_value=0.0, value=1.50, step=0.25)
-        manual_shipping = st.toggle("Manually enter shipping cost", value=False)
+    # Presets
+    st.markdown("#### Quick presets")
+    preset = st.selectbox(
+        "Preset",
+        [
+            "eBay (typical)",
+            "Facebook Marketplace (no platform fee)",
+            "Local pickup (no shipping)",
+            "Custom",
+        ],
+    )
+
+    # Defaults based on preset
+    if preset == "Facebook Marketplace (no platform fee)":
+        preset_ebay_fee = 0.0
+        preset_processing_pct = 2.9
+        preset_processing_fixed = 0.30
+        preset_ship_method = "Local pickup"
+    elif preset == "Local pickup (no shipping)":
+        preset_ebay_fee = 13.25
+        preset_processing_pct = 2.9
+        preset_processing_fixed = 0.30
+        preset_ship_method = "Local pickup"
+    else:
+        preset_ebay_fee = 13.25
+        preset_processing_pct = 2.9
+        preset_processing_fixed = 0.30
+        preset_ship_method = "Ground (est.)"
+
+    # Input groups
+    with st.expander("1) Sale + cost", expanded=not compact):
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            sale_price = st.number_input("Target sale price ($)", min_value=0.0, value=79.99, step=1.0)
+        with c2:
+            cogs = st.number_input("Your cost (COGS) ($)", min_value=0.0, value=25.00, step=1.0)
+        with c3:
+            packaging_cost = st.number_input("Packaging cost ($)", min_value=0.0, value=1.50, step=0.25)
+
+    with st.expander("2) Shipping", expanded=not compact):
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            shipping_method = st.selectbox(
+                "Shipping method",
+                ["Ground (est.)", "Priority (est.)", "Local pickup"],
+                index=["Ground (est.)", "Priority (est.)", "Local pickup"].index(preset_ship_method),
+            )
+        with c2:
+            weight = st.number_input("Estimated weight (lb)", min_value=0.0, value=2.0, step=0.25)
+        with c3:
+            manual_shipping = st.toggle("Manually enter shipping cost", value=False)
+
         if manual_shipping:
             shipping_cost = st.number_input("Shipping cost ($)", min_value=0.0, value=8.00, step=0.5)
         else:
             shipping_cost = shipping_estimate(shipping_method, weight)
             st.caption(f"Estimated shipping: **{money(shipping_cost)}**")
 
-    with c3:
-        st.markdown("#### Fee defaults")
-        ebay_fee_pct = st.number_input("eBay fee %", min_value=0.0, max_value=30.0, value=13.25, step=0.25)
-        processing_pct = st.number_input("Processing %", min_value=0.0, max_value=10.0, value=2.90, step=0.10)
-        processing_fixed = st.number_input("Processing fixed ($)", min_value=0.0, max_value=2.0, value=0.30, step=0.05)
+    with st.expander("3) Fees", expanded=not compact):
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            ebay_fee_pct = st.number_input(
+                "Platform fee %",
+                min_value=0.0,
+                max_value=30.0,
+                value=float(preset_ebay_fee) if preset != "Custom" else 13.25,
+                step=0.25,
+            )
+        with c2:
+            processing_pct = st.number_input(
+                "Processing %",
+                min_value=0.0,
+                max_value=10.0,
+                value=float(preset_processing_pct) if preset != "Custom" else 2.90,
+                step=0.10,
+            )
+        with c3:
+            processing_fixed = st.number_input(
+                "Processing fixed ($)",
+                min_value=0.0,
+                max_value=2.0,
+                value=float(preset_processing_fixed) if preset != "Custom" else 0.30,
+                step=0.05,
+            )
 
     st.markdown("---")
-    if st.button("Calculate profit", type="primary"):
+    if st.button("Calculate profit", type="primary", use_container_width=True):
         bump_stat("profit_checks", 1)
-        log_event("profit_checked", {"sale_price": sale_price, "cogs": cogs, "shipping_method": shipping_method})
+        log_event("profit_checked", {"sale_price": sale_price, "cogs": cogs, "shipping_method": shipping_method, "preset": preset})
 
         result = calc_profit(
             sale_price=sale_price,
@@ -914,7 +1083,15 @@ with tab_objs[1]:
         score = flip_score(result["profit"], result["margin_pct"], sale_price)
         badge = flip_badge(score)
 
-        st.session_state["last_profit"] = {**result, "score": score, "badge": badge}
+        st.session_state["last_profit"] = {
+            **result,
+            "score": score,
+            "badge": badge,
+            "shipping_cost": shipping_cost,
+            "packaging_cost": packaging_cost,
+            "cogs": cogs,
+            "sale_price": sale_price,
+        }
 
     result = st.session_state.get("last_profit")
     if not result:
@@ -931,6 +1108,14 @@ with tab_objs[1]:
         top[2].metric("Flip Score", f"{score} / 10")
         top[3].metric("Verdict", badge)
 
+        all_in = float(result["total_cost"])
+        st.markdown('<div class="tf-card">', unsafe_allow_html=True)
+        st.markdown("#### Summary")
+        st.write(f"**All-in cost:** {money(all_in)}")
+        st.write(f"**Sale price:** {money(float(result['sale_price']))}")
+        st.write(f"**Profit:** {money(profit)}  •  **Margin:** {margin:.1f}%  •  **Score:** {score}/10")
+        st.markdown("</div>", unsafe_allow_html=True)
+
         if "Bad" in badge:
             st.error("❌ I’d pass unless you can lower cost or raise sale price.")
         elif "Risky" in badge:
@@ -943,15 +1128,14 @@ with tab_objs[1]:
         st.markdown("#### Breakdown")
         b1, b2 = st.columns(2)
         with b1:
-            st.write(f"- eBay fee: **{money(result['ebay_fee'])}**")
+            st.write(f"- Platform fee: **{money(result['ebay_fee'])}**")
             st.write(f"- Processing: **{money(result['processing_fee'])}**")
-            st.write(f"- Shipping: **{money(shipping_cost)}**")
-            st.write(f"- Packaging: **{money(packaging_cost)}**")
+            st.write(f"- Shipping: **{money(float(result['shipping_cost']))}**")
+            st.write(f"- Packaging: **{money(float(result['packaging_cost']))}**")
         with b2:
-            st.write(f"- COGS: **{money(cogs)}**")
+            st.write(f"- COGS: **{money(float(result['cogs']))}**")
             st.write(f"- Total fees: **{money(result['total_fees'])}**")
             st.write(f"- Total cost (all-in): **{money(result['total_cost'])}**")
-            st.write(f"- Sale price: **{money(sale_price)}**")
 
         st.markdown("---")
         st.markdown("### 💾 Save profit check")
@@ -983,7 +1167,11 @@ with tab_objs[2]:
     colx, coly = st.columns([0.7, 0.3])
     with colx:
         email_cs = st.text_input("Email", key="email_comingsoon", placeholder="you@example.com")
-        note_cs = st.text_input("What feature do you want most? (optional)", key="note_comingsoon", placeholder="Saved checks, bulk mode, exports…")
+        note_cs = st.text_input(
+            "What feature do you want most? (optional)",
+            key="note_comingsoon",
+            placeholder="Saved checks, bulk mode, exports…",
+        )
     with coly:
         if st.button("Join waitlist", key="join_waitlist_cs", use_container_width=True):
             ok, msg = append_waitlist(email_cs, source=st.session_state.get("traffic_source", "unknown"), note=note_cs)
@@ -1014,6 +1202,7 @@ if cfg.get("show_how_it_works_tab", True):
 ### v1.2 update
 - Fixed TikTok tracking to support both `src=tiktok` and `utm_source=tiktok`
 - Added lightweight event logging for owner analytics
+- Cleaner UX: compact mode + output cards + better flip checker flow
 
 ### Privacy
 - No login required
