@@ -41,7 +41,6 @@ DEFAULT_STATS = {
     "listings_generated": 0,
     "emails_captured": 0,
     "save_pro_clicks": 0,
-    # new
     "sessions_by_source": {
         "tiktok": 0,
         "pinterest": 0,
@@ -130,7 +129,6 @@ def log_event(event: str, props: Optional[Dict[str, Any]] = None) -> None:
         with EVENTS_PATH.open("a", encoding="utf-8") as f:
             f.write(json.dumps(payload) + "\n")
     except Exception:
-        # never break the app if logging fails
         pass
 
 
@@ -176,7 +174,6 @@ def append_waitlist(email: str, source: str = "", note: str = "") -> Tuple[bool,
 # Helpers: query tracking (src + UTMs)
 # =========================
 def _qp_get(qp: Any, key: str) -> str:
-    """Compatible getter for Streamlit query params across versions."""
     try:
         val = qp.get(key, "")
         if isinstance(val, list):
@@ -204,17 +201,9 @@ def get_query_context() -> Dict[str, str]:
     utm_campaign = _qp_get(qp, "utm_campaign").lower()
     utm_content = _qp_get(qp, "utm_content").lower()
 
-    # Decide canonical traffic source:
-    # 1) if src exists, trust it
-    # 2) else use utm_source
-    # 3) else direct
     raw = src or utm_source or ""
-    if not raw:
-        traffic_source = "direct"
-    else:
-        traffic_source = raw
+    traffic_source = raw if raw else "direct"
 
-    # Normalize common sources
     if traffic_source in ("tt", "tik", "tiktokapp"):
         traffic_source = "tiktok"
 
@@ -229,8 +218,11 @@ def get_query_context() -> Dict[str, str]:
 
 
 def is_tiktok_context(ctx: Dict[str, str]) -> bool:
-    # Treat as TikTok if either legacy src OR utm_source points to tiktok
-    return (ctx.get("src") == "tiktok") or (ctx.get("utm_source") == "tiktok") or (ctx.get("traffic_source") == "tiktok")
+    return (
+        (ctx.get("src") == "tiktok")
+        or (ctx.get("utm_source") == "tiktok")
+        or (ctx.get("traffic_source") == "tiktok")
+    )
 
 
 def source_bucket(traffic_source: str) -> str:
@@ -243,7 +235,7 @@ def source_bucket(traffic_source: str) -> str:
         return "instagram"
     if s in ("fb", "facebook"):
         return "facebook"
-    if s == "direct" or s == "":
+    if s in ("direct", ""):
         return "direct"
     return "other"
 
@@ -273,7 +265,7 @@ def get_logo_bytes_and_mime() -> Tuple[Optional[bytes], Optional[str]]:
 
 
 # =========================
-# Styling (dark theme)
+# Styling (dark theme + cross-device readable text)
 # =========================
 def inject_css(accent: str) -> None:
     st.markdown(
@@ -286,15 +278,15 @@ def inject_css(accent: str) -> None:
             --sidebar2: #0A1017;
             --border: rgba(255,255,255,0.12);
             --border2: rgba(255,255,255,0.18);
-            --text: rgba(255,255,255,0.93);
-            --muted: rgba(255,255,255,0.74);
+            --text: #F3F4F6;      /* ✅ more reliable on Android */
+            --muted: #C7CAD1;     /* ✅ more reliable on Android */
             --radius: 16px;
             --radiusSm: 12px;
           }}
 
           html, body, [class*="css"] {{
             font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
-            color: var(--text);
+            color: var(--text) !important;
           }}
 
           .stApp {{
@@ -309,6 +301,7 @@ def inject_css(accent: str) -> None:
             max-width: 1200px;
           }}
 
+          /* ✅ Sidebar: solid + readable */
           [data-testid="stSidebar"] {{
             background: linear-gradient(180deg, var(--sidebar), var(--sidebar2)) !important;
             border-right: 1px solid var(--border2) !important;
@@ -320,25 +313,43 @@ def inject_css(accent: str) -> None:
           [data-testid="stSidebar"] p {{
             color: var(--muted) !important;
           }}
-
           [data-testid="stSidebar"] pre {{
             background: rgba(255,255,255,0.06) !important;
             border: 1px solid rgba(255,255,255,0.16) !important;
           }}
 
+          /* ✅ Cross-device text enforcement (fixes Android dark headings/labels) */
+          h1, h2, h3, h4, h5, h6,
+          p, li, label, span {{
+            color: var(--text) !important;
+          }}
+          [data-testid="stMarkdownContainer"] * {{
+            color: var(--text) !important;
+          }}
+          [data-testid="stCaptionContainer"] * {{
+            color: var(--muted) !important;
+          }}
+          .stTextInput label, .stTextArea label, .stNumberInput label, .stSelectbox label {{
+            color: rgba(255,255,255,0.88) !important;
+          }}
+
+          /* Inputs */
           .stTextInput > div > div > input,
           .stNumberInput > div > div > input,
           .stTextArea textarea {{
             background: rgba(255,255,255,0.03) !important;
             border: 1px solid var(--border) !important;
             border-radius: var(--radiusSm) !important;
+            color: var(--text) !important;
           }}
           .stSelectbox > div > div {{
             background: rgba(255,255,255,0.03) !important;
             border-radius: var(--radiusSm) !important;
             border: 1px solid var(--border) !important;
+            color: var(--text) !important;
           }}
 
+          /* Buttons */
           div.stButton > button {{
             border-radius: 14px !important;
             border: 1px solid var(--border2) !important;
@@ -358,6 +369,7 @@ def inject_css(accent: str) -> None:
             color: #07110A !important;
           }}
 
+          /* Tabs */
           .stTabs [data-baseweb="tab-list"] {{
             gap: 10px;
             padding: 8px;
@@ -370,7 +382,7 @@ def inject_css(accent: str) -> None:
             border-radius: 12px;
             padding-left: 14px;
             padding-right: 14px;
-            color: var(--muted);
+            color: var(--muted) !important;
           }}
           .stTabs [aria-selected="true"] {{
             background: rgba(255,255,255,0.06) !important;
@@ -378,18 +390,26 @@ def inject_css(accent: str) -> None:
             border: 1px solid rgba(255,255,255,0.10) !important;
           }}
 
+          /* Metrics */
           [data-testid="stMetric"] {{
             background: rgba(255,255,255,0.03);
             border: 1px solid var(--border);
             border-radius: var(--radius);
             padding: 14px 14px;
           }}
+          [data-testid="stMetric"] * {{
+            color: var(--text) !important;
+          }}
 
+          /* Code blocks */
           pre {{
             background: rgba(255,255,255,0.03) !important;
             border: 1px solid var(--border) !important;
             border-radius: var(--radius) !important;
             box-shadow: none !important;
+          }}
+          pre, code {{
+            color: var(--text) !important;
           }}
 
           hr {{
