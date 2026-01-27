@@ -1,7 +1,7 @@
 import os
 import re
 import json
-import base64
+import uuid
 import pathlib
 import datetime as dt
 from typing import Dict, Any, Optional, Tuple
@@ -22,11 +22,12 @@ CONFIG_PATH = DATA_DIR / "config.json"
 STATS_PATH = DATA_DIR / "stats.json"
 WAITLIST_CSV = DATA_DIR / "waitlist.csv"
 LOGO_OVERRIDE_PATH = DATA_DIR / "logo_override.png"
+EVENTS_PATH = DATA_DIR / "events.jsonl"
 
 DEFAULT_CONFIG = {
     "app_name": "Resale Listing Builder",
     "tagline": "List faster. Price smarter. Profit confidently.",
-    "accent_color": "#22C55E",  # money green default (owner can change)
+    "accent_color": "#22C55E",
     "logo_size": 56,
     "show_how_it_works_tab": True,
 }
@@ -35,11 +36,20 @@ DEFAULT_STATS = {
     "created_at": None,
     "updated_at": None,
     "sessions": 0,
-    "tiktok_sessions": 0,
+    "tiktok_sessions": 0,  # kept for compatibility
     "profit_checks": 0,
     "listings_generated": 0,
     "emails_captured": 0,
-    "save_pro_clicks": 0,  # kept for future
+    "save_pro_clicks": 0,
+    # new
+    "sessions_by_source": {
+        "tiktok": 0,
+        "pinterest": 0,
+        "instagram": 0,
+        "facebook": 0,
+        "direct": 0,
+        "other": 0,
+    },
 }
 
 
@@ -75,10 +85,21 @@ def save_config(cfg: Dict[str, Any]) -> None:
 
 def load_stats() -> Dict[str, Any]:
     stats = _read_json(STATS_PATH, DEFAULT_STATS)
+
+    # backfill defaults (including nested dict)
     for k, v in DEFAULT_STATS.items():
-        stats.setdefault(k, v)
-    if stats["created_at"] is None:
+        if k not in stats:
+            stats[k] = v
+
+    if not isinstance(stats.get("sessions_by_source"), dict):
+        stats["sessions_by_source"] = dict(DEFAULT_STATS["sessions_by_source"])
+
+    for sk, sv in DEFAULT_STATS["sessions_by_source"].items():
+        stats["sessions_by_source"].setdefault(sk, sv)
+
+    if stats.get("created_at") is None:
         stats["created_at"] = dt.datetime.utcnow().isoformat()
+
     return stats
 
 
@@ -91,6 +112,26 @@ def bump_stat(key: str, n: int = 1) -> None:
     stats = load_stats()
     stats[key] = int(stats.get(key, 0)) + n
     save_stats(stats)
+
+
+# =========================
+# Event logging (lightweight)
+# =========================
+def log_event(event: str, props: Optional[Dict[str, Any]] = None) -> None:
+    """Append one JSON event per line to data/events.jsonl (safe + simple)."""
+    try:
+        payload = {
+            "ts_utc": dt.datetime.utcnow().isoformat(),
+            "event": event,
+            "session_id": st.session_state.get("session_id", ""),
+            "source": st.session_state.get("traffic_source", ""),
+            "props": props or {},
+        }
+        with EVENTS_PATH.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(payload) + "\n")
+    except Exception:
+        # never break the app if logging fails
+        pass
 
 
 # =========================
@@ -122,26 +163,89 @@ def append_waitlist(email: str, source: str = "", note: str = "") -> Tuple[bool,
 
     ts = dt.datetime.utcnow().isoformat()
     safe_source = (source or "").replace(",", " ").strip()
-    safe_note = (note or "").replace(",", " ").strip()
+    safe_note = (note or "").replace(",", " ").replace("\n", " ").strip()
     with WAITLIST_CSV.open("a", encoding="utf-8") as f:
         f.write(f"{ts},{email},{safe_source},{safe_note}\n")
 
     bump_stat("emails_captured", 1)
+    log_event("waitlist_joined", {"note": safe_note})
     return True, "You’re on the waitlist ✅"
 
 
 # =========================
-# Helpers: query source tracking
+# Helpers: query tracking (src + UTMs)
 # =========================
-def get_query_source() -> str:
+def _qp_get(qp: Any, key: str) -> str:
+    """Compatible getter for Streamlit query params across versions."""
     try:
-        qp = st.query_params
-        src = qp.get("src", "")
-        if isinstance(src, list):
-            src = src[0] if src else ""
-        return (src or "").strip().lower()
+        val = qp.get(key, "")
+        if isinstance(val, list):
+            val = val[0] if val else ""
+        return (val or "").strip()
     except Exception:
         return ""
+
+
+def get_query_context() -> Dict[str, str]:
+    """
+    Supports:
+      - legacy: ?src=tiktok
+      - standard: ?utm_source=tiktok&utm_medium=social&utm_campaign=organic
+    """
+    try:
+        qp = st.query_params
+    except Exception:
+        qp = {}
+
+    src = _qp_get(qp, "src").lower()
+
+    utm_source = _qp_get(qp, "utm_source").lower()
+    utm_medium = _qp_get(qp, "utm_medium").lower()
+    utm_campaign = _qp_get(qp, "utm_campaign").lower()
+    utm_content = _qp_get(qp, "utm_content").lower()
+
+    # Decide canonical traffic source:
+    # 1) if src exists, trust it
+    # 2) else use utm_source
+    # 3) else direct
+    raw = src or utm_source or ""
+    if not raw:
+        traffic_source = "direct"
+    else:
+        traffic_source = raw
+
+    # Normalize common sources
+    if traffic_source in ("tt", "tik", "tiktokapp"):
+        traffic_source = "tiktok"
+
+    return {
+        "src": src,
+        "utm_source": utm_source,
+        "utm_medium": utm_medium,
+        "utm_campaign": utm_campaign,
+        "utm_content": utm_content,
+        "traffic_source": traffic_source,
+    }
+
+
+def is_tiktok_context(ctx: Dict[str, str]) -> bool:
+    # Treat as TikTok if either legacy src OR utm_source points to tiktok
+    return (ctx.get("src") == "tiktok") or (ctx.get("utm_source") == "tiktok") or (ctx.get("traffic_source") == "tiktok")
+
+
+def source_bucket(traffic_source: str) -> str:
+    s = (traffic_source or "").strip().lower()
+    if s == "tiktok":
+        return "tiktok"
+    if s == "pinterest":
+        return "pinterest"
+    if s in ("ig", "instagram"):
+        return "instagram"
+    if s in ("fb", "facebook"):
+        return "facebook"
+    if s == "direct" or s == "":
+        return "direct"
+    return "other"
 
 
 # =========================
@@ -178,7 +282,7 @@ def inject_css(accent: str) -> None:
           :root {{
             --accent: {accent};
             --bg: #0B0F14;
-            --sidebar: #080C11; /* ✅ solid sidebar */
+            --sidebar: #080C11;
             --sidebar2: #0A1017;
             --border: rgba(255,255,255,0.12);
             --border2: rgba(255,255,255,0.18);
@@ -205,7 +309,6 @@ def inject_css(accent: str) -> None:
             max-width: 1200px;
           }}
 
-          /* ✅ Sidebar: make it solid + readable */
           [data-testid="stSidebar"] {{
             background: linear-gradient(180deg, var(--sidebar), var(--sidebar2)) !important;
             border-right: 1px solid var(--border2) !important;
@@ -213,18 +316,16 @@ def inject_css(accent: str) -> None:
           [data-testid="stSidebar"] * {{
             color: var(--text) !important;
           }}
-          [data-testid="stSidebar"] .stCaption, 
+          [data-testid="stSidebar"] .stCaption,
           [data-testid="stSidebar"] p {{
             color: var(--muted) !important;
           }}
 
-          /* Sidebar code blocks */
           [data-testid="stSidebar"] pre {{
             background: rgba(255,255,255,0.06) !important;
             border: 1px solid rgba(255,255,255,0.16) !important;
           }}
 
-          /* Inputs */
           .stTextInput > div > div > input,
           .stNumberInput > div > div > input,
           .stTextArea textarea {{
@@ -238,7 +339,6 @@ def inject_css(accent: str) -> None:
             border: 1px solid var(--border) !important;
           }}
 
-          /* Buttons */
           div.stButton > button {{
             border-radius: 14px !important;
             border: 1px solid var(--border2) !important;
@@ -258,7 +358,6 @@ def inject_css(accent: str) -> None:
             color: #07110A !important;
           }}
 
-          /* Tabs */
           .stTabs [data-baseweb="tab-list"] {{
             gap: 10px;
             padding: 8px;
@@ -279,7 +378,6 @@ def inject_css(accent: str) -> None:
             border: 1px solid rgba(255,255,255,0.10) !important;
           }}
 
-          /* Metrics */
           [data-testid="stMetric"] {{
             background: rgba(255,255,255,0.03);
             border: 1px solid var(--border);
@@ -321,7 +419,7 @@ def render_header_native(cfg: Dict[str, Any]) -> None:
             st.caption(cfg.get("tagline", ""))
 
     with c2:
-        st.caption("Offline-friendly • v1.1")
+        st.caption("Offline-friendly • v1.2")
         st.caption("No login • Flip Score free ✅")
 
     st.divider()
@@ -489,13 +587,28 @@ st.set_page_config(
 cfg = load_config()
 inject_css(cfg.get("accent_color", DEFAULT_CONFIG["accent_color"]))
 
-# Session stats
+# ---- Session + traffic context (one-time per session)
+if "session_id" not in st.session_state:
+    st.session_state["session_id"] = str(uuid.uuid4())
+
+ctx = get_query_context()
+st.session_state["traffic_ctx"] = ctx
+st.session_state["traffic_source"] = ctx.get("traffic_source", "direct")
+
 if "session_bumped" not in st.session_state:
     bump_stat("sessions", 1)
-    src = get_query_source()
-    if src == "tiktok":
-        bump_stat("tiktok_sessions", 1)
+
+    stats = load_stats()
+    bucket = source_bucket(st.session_state["traffic_source"])
+    stats["sessions_by_source"][bucket] = int(stats["sessions_by_source"].get(bucket, 0)) + 1
+
+    if is_tiktok_context(ctx):
+        stats["tiktok_sessions"] = int(stats.get("tiktok_sessions", 0)) + 1
+
+    save_stats(stats)
+    log_event("session_started", {"ctx": ctx})
     st.session_state["session_bumped"] = True
+
 
 # Owner mode
 ADMIN_PIN = os.getenv("ADMIN_PIN", "").strip()
@@ -543,12 +656,27 @@ with st.sidebar:
 
         st.markdown("---")
         st.markdown("### 📊 Owner Dashboard")
+
         stats = load_stats()
+
         st.write(f"**Sessions:** {stats.get('sessions', 0)}")
-        st.write(f"**TikTok sessions:** {stats.get('tiktok_sessions', 0)}  *(use `?src=tiktok`)*")
+        st.write(f"**TikTok sessions:** {stats.get('tiktok_sessions', 0)}  *(supports `?src=tiktok` + `?utm_source=tiktok`)*")
         st.write(f"**Profit checks:** {stats.get('profit_checks', 0)}")
         st.write(f"**Listings generated:** {stats.get('listings_generated', 0)}")
         st.write(f"**Emails captured:** {stats.get('emails_captured', 0)}")
+
+        st.markdown("#### Sessions by source")
+        sbs = stats.get("sessions_by_source", {})
+        cols = st.columns(3)
+        cols[0].metric("TikTok", int(sbs.get("tiktok", 0)))
+        cols[1].metric("Direct", int(sbs.get("direct", 0)))
+        cols[2].metric("Other", int(sbs.get("other", 0)))
+
+        st.caption(
+            "Tip: Use UTM links like "
+            "`...?utm_source=tiktok&utm_medium=social&utm_campaign=organic` "
+            "so you can track by platform reliably."
+        )
 
         st.download_button(
             "Download stats.json",
@@ -557,6 +685,15 @@ with st.sidebar:
             mime="application/json",
             use_container_width=True,
         )
+
+        if EVENTS_PATH.exists():
+            st.download_button(
+                "Download events.jsonl",
+                data=EVENTS_PATH.read_bytes(),
+                file_name="events.jsonl",
+                mime="application/x-ndjson",
+                use_container_width=True,
+            )
 
         if WAITLIST_CSV.exists():
             st.download_button(
@@ -571,15 +708,18 @@ with st.sidebar:
 
     else:
         st.caption("Free tool. No login. Built for fast flips.")
-        st.markdown("**Tracking tip:**")
-        st.code("https://YOUR_APP_URL/?src=tiktok", language=None)
+        st.markdown("**Tracking tip (use this in TikTok bio):**")
+        st.code(
+            "https://YOUR_APP_URL/?utm_source=tiktok&utm_medium=social&utm_campaign=organic",
+            language=None,
+        )
 
         st.markdown("---")
         st.markdown("#### Get updates")
         st.caption("Want Bulk Mode + Saved Checks? Join the waitlist (optional).")
         email_side = st.text_input("Email", key="email_sidebar", placeholder="you@example.com")
         if st.button("Join waitlist", use_container_width=True):
-            ok, msg = append_waitlist(email_side, source=get_query_source() or "app_sidebar", note="sidebar")
+            ok, msg = append_waitlist(email_side, source=st.session_state.get("traffic_source", "unknown"), note="sidebar")
             (st.success(msg) if ok else st.warning(msg))
 
 
@@ -611,7 +751,7 @@ with tab_objs[0]:
         with col2:
             condition = st.selectbox(
                 "Condition",
-                ["New", "Open box", "Used - Like New", "Used - Good", "Used - Fair", "For parts/repair"],
+                ["New", "Open box", "Used - Like New", "Used - Good", "Used - Fair", "Used - Poor", "For parts/repair"],
             )
             category = st.text_input("Category (optional)", placeholder="Electronics, Tools, Home, etc.")
             qty = st.number_input("Quantity", min_value=1, max_value=100, value=1, step=1)
@@ -648,6 +788,8 @@ with tab_objs[0]:
 
         if generate:
             bump_stat("listings_generated", 1)
+            log_event("listing_generated", {"category": category, "condition": condition})
+
             payload = build_listing_text(
                 brand=brand,
                 item=item,
@@ -701,7 +843,7 @@ with tab_objs[0]:
         email_main = st.text_input("Email address", key="email_main", placeholder="you@example.com")
     with colw2:
         if st.button("Join waitlist", key="join_waitlist_main", use_container_width=True):
-            ok, msg = append_waitlist(email_main, source=get_query_source() or "app_main", note="main_footer")
+            ok, msg = append_waitlist(email_main, source=st.session_state.get("traffic_source", "unknown"), note="main_footer")
             (st.success(msg) if ok else st.warning(msg))
 
 
@@ -710,7 +852,7 @@ with tab_objs[0]:
 # =========================
 with tab_objs[1]:
     st.markdown("### Flip Checker (profit after fees + shipping)")
-    st.caption("v1.1 adds **Flip Score** — a quick quality rating for the deal.")
+    st.caption("v1.2 adds better traffic tracking + event logs for owner analytics.")
 
     c1, c2, c3 = st.columns(3)
     with c1:
@@ -737,6 +879,7 @@ with tab_objs[1]:
     st.markdown("---")
     if st.button("Calculate profit", type="primary"):
         bump_stat("profit_checks", 1)
+        log_event("profit_checked", {"sale_price": sale_price, "cogs": cogs, "shipping_method": shipping_method})
 
         result = calc_profit(
             sale_price=sale_price,
@@ -823,11 +966,14 @@ with tab_objs[2]:
         note_cs = st.text_input("What feature do you want most? (optional)", key="note_comingsoon", placeholder="Saved checks, bulk mode, exports…")
     with coly:
         if st.button("Join waitlist", key="join_waitlist_cs", use_container_width=True):
-            ok, msg = append_waitlist(email_cs, source=get_query_source() or "coming_soon", note=note_cs)
+            ok, msg = append_waitlist(email_cs, source=st.session_state.get("traffic_source", "unknown"), note=note_cs)
             (st.success(msg) if ok else st.warning(msg))
 
     st.markdown("---")
-    st.info("Tracking tip: keep your TikTok bio link as `...?src=tiktok` so we can measure TikTok traffic.")
+    st.info(
+        "Tracking tip: use UTM links in bio, e.g. "
+        "`...?utm_source=tiktok&utm_medium=social&utm_campaign=organic`"
+    )
 
 
 # =========================
@@ -845,12 +991,13 @@ if cfg.get("show_how_it_works_tab", True):
   - processing fee %
   - shipping + packaging
 
-### v1.1 update
-- Added **Flip Score** (1–10) + verdict badge to make decisions faster.
+### v1.2 update
+- Fixed TikTok tracking to support both `src=tiktok` and `utm_source=tiktok`
+- Added lightweight event logging for owner analytics
 
 ### Privacy
 - No login required
 - Waitlist is optional
-- App tracking is anonymous counters only (no personal data)
+- Tracking is anonymous counters + events (no personal identity stored)
             """.strip()
         )
