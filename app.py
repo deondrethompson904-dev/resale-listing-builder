@@ -53,6 +53,8 @@ DEFAULT_STATS = {
     },
 }
 
+APP_VERSION = "v1.3"
+
 
 # =========================
 # Helpers: JSON + counters
@@ -240,7 +242,7 @@ def source_bucket(traffic_source: str) -> str:
 
 
 # =========================
-# Helpers: logo
+# Helpers: logo (FIXED + CLEAN HEADER SUPPORT)
 # =========================
 def read_file_bytes(path: pathlib.Path) -> Optional[bytes]:
     try:
@@ -251,20 +253,39 @@ def read_file_bytes(path: pathlib.Path) -> Optional[bytes]:
     return None
 
 
-def get_logo_bytes_and_mime() -> Tuple[Optional[bytes], Optional[str]]:
+def get_logo_source() -> Tuple[Optional[str], Optional[bytes], Optional[str]]:
+    """
+    Priority:
+      1) LOGO_URL env var (remote URL)
+      2) data/logo_override.png
+      3) assets/logo.png
+      4) assets/logo.svg
+      5) None (fallback badge)
+    Returns: (logo_url, logo_bytes, mime)
+    """
+    logo_url = (os.getenv("LOGO_URL", "") or "").strip()
+    if logo_url:
+        return logo_url, None, None
+
     override = read_file_bytes(LOGO_OVERRIDE_PATH)
     if override:
-        return override, "image/png"
+        return None, override, "image/png"
 
     png = read_file_bytes(ASSETS_DIR / "logo.png")
     if png:
-        return png, "image/png"
+        return None, png, "image/png"
 
     svg = read_file_bytes(ASSETS_DIR / "logo.svg")
     if svg:
-        return svg, "image/svg+xml"
+        return None, svg, "image/svg+xml"
 
-    return None, None
+    return None, None, None
+
+
+def get_logo_bytes_and_mime() -> Tuple[Optional[bytes], Optional[str]]:
+    # Backwards-compatible wrapper
+    _, b, m = get_logo_source()
+    return b, m
 
 
 # =========================
@@ -488,6 +509,95 @@ def inject_css(accent: str) -> None:
             border-color: rgba(255,255,255,0.10) !important;
           }}
 
+          /* ===== Header bar (CLEAN) ===== */
+          .tf-headerbar {{
+            background: rgba(255,255,255,0.04);
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 12px 14px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 14px;
+          }}
+          .tf-header-left {{
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            min-width: 0;
+          }}
+          .tf-header-logo {{
+            width: 54px;
+            height: 54px;
+            border-radius: 14px;
+            overflow: hidden;
+            flex: 0 0 auto;
+            display: grid;
+            place-items: center;
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.10);
+          }}
+          .tf-header-logo img {{
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+          }}
+          .tf-header-title {{
+            min-width: 0;
+          }}
+          .tf-header-title .name {{
+            font-weight: 900;
+            font-size: 1.25rem;
+            line-height: 1.15;
+            margin: 0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }}
+          .tf-header-title .tagline {{
+            margin-top: 2px;
+            color: var(--muted) !important;
+            font-size: 0.95rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+          }}
+          .tf-header-right {{
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+          }}
+          .tf-chip {{
+            display:inline-flex;
+            align-items:center;
+            gap: 6px;
+            padding: 6px 10px;
+            border-radius: 999px;
+            border: 1px solid rgba(255,255,255,0.14);
+            background: rgba(255,255,255,0.05);
+            color: var(--muted) !important;
+            font-size: 0.85rem;
+            white-space: nowrap;
+          }}
+          @media (max-width: 640px) {{
+            .tf-headerbar {{
+              padding: 10px 12px;
+            }}
+            .tf-header-logo {{
+              width: 46px;
+              height: 46px;
+              border-radius: 12px;
+            }}
+            .tf-header-title .name {{
+              font-size: 1.12rem;
+            }}
+            .tf-header-right {{
+              display: none; /* keep header clean on phones */
+            }}
+          }}
+
           @media (max-width: 768px) {{
             section.main > div.block-container {{
               padding-top: 0.8rem;
@@ -502,30 +612,49 @@ def inject_css(accent: str) -> None:
 
 
 def render_header_native(cfg: Dict[str, Any]) -> None:
-    logo_bytes, mime = get_logo_bytes_and_mime()
-    size = int(cfg.get("logo_size", 56))
+    """
+    Clean top header:
+    - logo priority: LOGO_URL -> data/logo_override.png -> assets/logo.png -> assets/logo.svg -> initials
+    - consistent layout across all sources (URL + local bytes)
+    """
+    logo_url, logo_bytes, mime = get_logo_source()
 
-    c1, c2 = st.columns([0.72, 0.28], vertical_alignment="center")
+    app_name = cfg.get("app_name", "Resale Listing Builder")
+    tagline = cfg.get("tagline", "")
+    initials = "".join([w[:1] for w in app_name.split()[:2]]).upper() or "RL"
 
-    with c1:
-        left = st.columns([0.12, 0.88], vertical_alignment="center")
-        with left[0]:
-            if logo_bytes:
-                if mime == "image/svg+xml":
-                    # Streamlit can display svg bytes as image
-                    st.image(logo_bytes, width=size)
-                else:
-                    st.image(logo_bytes, width=size)
-            else:
-                st.markdown("### 🧾")
-        with left[1]:
-            st.markdown(f"## {cfg.get('app_name','Resale Listing Builder')}")
-            st.caption(cfg.get("tagline", ""))
+    img_src = ""
+    if logo_url:
+        img_src = logo_url
+    elif logo_bytes and mime:
+        b64 = base64.b64encode(logo_bytes).decode("utf-8")
+        img_src = f"data:{mime};base64,{b64}"
 
-    with c2:
-        st.caption("Offline-friendly • v1.3")
-        st.caption("No login • Dark mode ✅")
+    left_logo_html = (
+        f"<img src='{img_src}' alt='logo' />"
+        if img_src
+        else f"<div style='font-weight:900;color:var(--text);'>{initials}</div>"
+    )
 
+    st.markdown(
+        f"""
+        <div class="tf-headerbar">
+          <div class="tf-header-left">
+            <div class="tf-header-logo">{left_logo_html}</div>
+            <div class="tf-header-title">
+              <div class="name">{app_name}</div>
+              <div class="tagline">{tagline}</div>
+            </div>
+          </div>
+          <div class="tf-header-right">
+            <span class="tf-chip">Offline-friendly</span>
+            <span class="tf-chip">No login</span>
+            <span class="tf-chip">{APP_VERSION}</span>
+          </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
     st.divider()
 
 
@@ -660,7 +789,6 @@ PHOTO_CHECKLISTS = {
 
 def _keywords_from_features(features_lines: str, max_k: int = 3) -> List[str]:
     lines = [ln.strip() for ln in (features_lines or "").splitlines() if ln.strip()]
-    # Keep short keyword-ish lines
     keep: List[str] = []
     for ln in lines[:10]:
         if len(ln) <= 28:
@@ -700,7 +828,6 @@ def build_title_variants(
     if cond == "For parts/repair":
         variants.append(" ".join([b, it, m, "For Parts/Repair"]).strip())
 
-    # Unique + trimmed
     uniq = []
     seen = set()
     for v in variants:
@@ -733,7 +860,6 @@ def platform_description(
     feat_bul = "\n".join([f"- {x}" for x in features]) if features else ""
     def_bul = "\n".join([f"- {x}" for x in defects]) if defects else ""
 
-    # eBay: markdown-ish
     if platform == "ebay":
         return f"""
 ## {title}
@@ -755,7 +881,6 @@ def platform_description(
 {parts_repair_note}
 """.strip()
 
-    # FB: simple readable
     if platform == "facebook marketplace" or platform == "facebook":
         lines = []
         lines.append(title)
@@ -779,10 +904,9 @@ def platform_description(
         lines.append(f"Returns: {returns_line or '—'}")
         if parts_repair_note:
             lines.append("")
-            lines.append(parts_repair_note.replace("**", ""))  # remove markdown emphasis
+            lines.append(parts_repair_note.replace("**", ""))
         return "\n".join(lines).strip()
 
-    # Mercari: short + skimmable
     if platform == "mercari":
         lines = []
         lines.append(title)
@@ -800,7 +924,6 @@ def platform_description(
             lines.append(parts_repair_note.replace("**", ""))
         return "\n".join(lines).strip()
 
-    # OfferUp: friendly + direct
     if platform == "offerup":
         lines = []
         lines.append(title)
@@ -822,7 +945,6 @@ def platform_description(
             lines.append(parts_repair_note.replace("**", ""))
         return "\n".join(lines).strip()
 
-    # fallback (generic)
     return f"{title}\n\nCondition: {condition}\n\n{feat_bul}\n\n{def_bul}".strip()
 
 
@@ -847,10 +969,8 @@ def build_listing_payload(
     features = [ln.strip() for ln in (features_lines or "").splitlines() if ln.strip()]
     defects = [ln.strip() for ln in (defects_lines or "").splitlines() if ln.strip()]
 
-    # Condition template
     if use_condition_template and condition in CONDITION_TEMPLATES:
         tmpl = CONDITION_TEMPLATES[condition]
-        # avoid duplicating if already included
         if tmpl and tmpl not in defects:
             defects = defects + [tmpl]
 
@@ -1044,7 +1164,7 @@ with st.sidebar:
 
 
 # =========================
-# Header
+# Header (FIXED + CLEAN)
 # =========================
 render_header_native(cfg)
 st.caption("Listings + Profit + **Flip Score**. Dark mode by default. ✅")
@@ -1108,7 +1228,6 @@ with tab_objs[0]:
                 include_parts_repair_note = st.toggle("Extra protection text for parts/repair", value=True)
 
                 st.markdown("#### Photo checklist")
-                # pick checklist bucket
                 cat_lower = (category or "").lower()
                 if any(k in cat_lower for k in ["electronic", "laptop", "phone", "camera", "tablet", "console"]):
                     bucket = "Electronics"
@@ -1172,7 +1291,6 @@ with tab_objs[0]:
         if not payload:
             st.info("Fill out the item and click **Generate listing text**.")
         else:
-            # Allow selecting the best title
             variants = payload.get("title_variants") or [payload.get("title", "Item for sale")]
             selected = st.selectbox(
                 "Choose a title (optimizer)",
@@ -1181,9 +1299,7 @@ with tab_objs[0]:
                 help="Pick the best keyword order. Aim for ≤ 80 characters for eBay.",
             )
             payload["title"] = selected
-            # Rebuild description with selected title so all outputs match
-            # (Keeps platform consistent + updates title inside description)
-            # We'll use platform_description with existing parsed features/defects.
+
             platform = payload.get("platform", "eBay")
             desc = platform_description(
                 platform=platform,
