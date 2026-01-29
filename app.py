@@ -242,7 +242,7 @@ def source_bucket(traffic_source: str) -> str:
 
 
 # =========================
-# Helpers: logo (FIXED + CLEAN HEADER SUPPORT)
+# Helpers: logo (CLEAN HEADER SUPPORT)
 # =========================
 def read_file_bytes(path: pathlib.Path) -> Optional[bytes]:
     try:
@@ -280,12 +280,6 @@ def get_logo_source() -> Tuple[Optional[str], Optional[bytes], Optional[str]]:
         return None, svg, "image/svg+xml"
 
     return None, None, None
-
-
-def get_logo_bytes_and_mime() -> Tuple[Optional[bytes], Optional[str]]:
-    # Backwards-compatible wrapper
-    _, b, m = get_logo_source()
-    return b, m
 
 
 # =========================
@@ -331,7 +325,7 @@ def card(title: str, body_fn) -> None:
 
 
 # =========================
-# Styling (dark theme + Android/iOS readable + visible control panel)
+# Styling (dark theme + readable + solid sidebar)
 # =========================
 def inject_css(accent: str) -> None:
     st.markdown(
@@ -343,10 +337,9 @@ def inject_css(accent: str) -> None:
             --sidebar: #070A0F;
             --sidebar2: #0A111A;
             --card: rgba(255,255,255,0.04);
-            --card2: rgba(255,255,255,0.06);
             --border: rgba(255,255,255,0.14);
             --border2: rgba(255,255,255,0.20);
-            --text: #F3F4F6;      /* solid text helps Android */
+            --text: #F3F4F6;
             --muted: #B6BAC4;
             --radius: 16px;
             --radiusSm: 12px;
@@ -370,7 +363,7 @@ def inject_css(accent: str) -> None:
             max-width: 1200px;
           }}
 
-          /* Sidebar MUST be solid */
+          /* Sidebar solid */
           [data-testid="stSidebar"] {{
             background: linear-gradient(180deg, var(--sidebar), var(--sidebar2)) !important;
             border-right: 1px solid var(--border2) !important;
@@ -381,17 +374,6 @@ def inject_css(accent: str) -> None:
           }}
           [data-testid="stSidebar"] .stCaption,
           [data-testid="stSidebar"] p {{
-            color: var(--muted) !important;
-          }}
-
-          /* Cross-device text enforcement */
-          h1, h2, h3, h4, h5, h6, p, li, label, span {{
-            color: var(--text) !important;
-          }}
-          [data-testid="stMarkdownContainer"] * {{
-            color: var(--text) !important;
-          }}
-          [data-testid="stCaptionContainer"] * {{
             color: var(--muted) !important;
           }}
 
@@ -463,25 +445,6 @@ def inject_css(accent: str) -> None:
             color: var(--text) !important;
           }}
 
-          /* Expander */
-          details {{
-            background: rgba(255,255,255,0.03);
-            border: 1px solid var(--border);
-            border-radius: var(--radius);
-            padding: 8px 10px;
-          }}
-
-          /* Code blocks */
-          pre {{
-            background: rgba(255,255,255,0.04) !important;
-            border: 1px solid var(--border) !important;
-            border-radius: var(--radius) !important;
-            box-shadow: none !important;
-          }}
-          pre, code {{
-            color: var(--text) !important;
-          }}
-
           /* Card helper */
           .tf-card {{
             background: var(--card);
@@ -505,11 +468,7 @@ def inject_css(accent: str) -> None:
             font-size: 0.85rem;
           }}
 
-          hr {{
-            border-color: rgba(255,255,255,0.10) !important;
-          }}
-
-          /* ===== Header bar (CLEAN) ===== */
+          /* Header bar */
           .tf-headerbar {{
             background: rgba(255,255,255,0.04);
             border: 1px solid var(--border);
@@ -582,8 +541,8 @@ def inject_css(accent: str) -> None:
             white-space: nowrap;
           }}
           @media (max-width: 640px) {{
-            .tf-headerbar {{
-              padding: 10px 12px;
+            .tf-header-right {{
+              display: none;
             }}
             .tf-header-logo {{
               width: 46px;
@@ -593,17 +552,6 @@ def inject_css(accent: str) -> None:
             .tf-header-title .name {{
               font-size: 1.12rem;
             }}
-            .tf-header-right {{
-              display: none; /* keep header clean on phones */
-            }}
-          }}
-
-          @media (max-width: 768px) {{
-            section.main > div.block-container {{
-              padding-top: 0.8rem;
-              padding-left: 0.8rem;
-              padding-right: 0.8rem;
-            }}
           }}
         </style>
         """,
@@ -612,11 +560,6 @@ def inject_css(accent: str) -> None:
 
 
 def render_header_native(cfg: Dict[str, Any]) -> None:
-    """
-    Clean top header:
-    - logo priority: LOGO_URL -> data/logo_override.png -> assets/logo.png -> assets/logo.svg -> initials
-    - consistent layout across all sources (URL + local bytes)
-    """
     logo_url, logo_bytes, mime = get_logo_source()
 
     app_name = cfg.get("app_name", "Resale Listing Builder")
@@ -659,7 +602,7 @@ def render_header_native(cfg: Dict[str, Any]) -> None:
 
 
 # =========================
-# Core logic
+# Core logic: profit + score
 # =========================
 def calc_profit(
     sale_price: float,
@@ -881,7 +824,7 @@ def platform_description(
 {parts_repair_note}
 """.strip()
 
-    if platform == "facebook marketplace" or platform == "facebook":
+    if platform in ("facebook marketplace", "facebook"):
         lines = []
         lines.append(title)
         lines.append("")
@@ -1164,7 +1107,7 @@ with st.sidebar:
 
 
 # =========================
-# Header (FIXED + CLEAN)
+# Header
 # =========================
 render_header_native(cfg)
 st.caption("Listings + Profit + **Flip Score**. Dark mode by default. ✅")
