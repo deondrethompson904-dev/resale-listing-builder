@@ -223,7 +223,11 @@ def get_query_context() -> Dict[str, str]:
 
 
 def is_tiktok_context(ctx: Dict[str, str]) -> bool:
-    return (ctx.get("src") == "tiktok") or (ctx.get("utm_source") == "tiktok") or (ctx.get("traffic_source") == "tiktok")
+    return (
+        (ctx.get("src") == "tiktok")
+        or (ctx.get("utm_source") == "tiktok")
+        or (ctx.get("traffic_source") == "tiktok")
+    )
 
 
 def source_bucket(traffic_source: str) -> str:
@@ -600,7 +604,6 @@ def render_header_native(cfg: Dict[str, Any]) -> None:
     )
     st.divider()
 
-
 # =========================
 # Core logic: profit + score
 # =========================
@@ -640,10 +643,9 @@ def shipping_estimate(method: str, weight_lb: float) -> float:
     return 7.50 + 1.20 * w
 
 
-def flip_score(profit: float, margin_pct: float, sale_price: float) -> float:
-    score = 5.0
-    if profit >= 25:
-        score += 2.0
+def flip_score(profit: float, margin_pct:
+
+             score += 2.0
     if profit >= 50:
         score += 3.0
     if margin_pct >= 40:
@@ -951,367 +953,7 @@ def build_listing_payload(
         "features": features,
         "defects": defects,
         "parts_repair_note": parts_repair_note,
-    }
-
-
-# =========================
-# App boot
-# =========================
-st.set_page_config(
-    page_title="Resale Listing Builder",
-    page_icon="🧾",
-    layout="wide",
-    initial_sidebar_state="expanded",
-)
-
-cfg = load_config()
-inject_css(cfg.get("accent_color", DEFAULT_CONFIG["accent_color"]))
-
-# ---- Session + traffic context (one-time per session)
-if "session_id" not in st.session_state:
-    st.session_state["session_id"] = str(uuid.uuid4())
-
-ctx = get_query_context()
-st.session_state["traffic_ctx"] = ctx
-st.session_state["traffic_source"] = ctx.get("traffic_source", "direct")
-
-if "session_bumped" not in st.session_state:
-    bump_stat("sessions", 1)
-
-    stats = load_stats()
-    bucket = source_bucket(st.session_state["traffic_source"])
-    stats["sessions_by_source"][bucket] = int(stats["sessions_by_source"].get(bucket, 0)) + 1
-
-    if is_tiktok_context(ctx):
-        stats["tiktok_sessions"] = int(stats.get("tiktok_sessions", 0)) + 1
-
-    save_stats(stats)
-    log_event("session_started", {"ctx": ctx})
-    st.session_state["session_bumped"] = True
-
-# UI preferences
-if "compact_mode" not in st.session_state:
-    st.session_state["compact_mode"] = True
-
-
-# =========================
-# Sidebar
-# =========================
-ADMIN_PIN = os.getenv("ADMIN_PIN", "").strip()
-is_owner = False
-
-with st.sidebar:
-    st.markdown("### Control Panel")
-
-    st.toggle("Compact mode (better on phones)", key="compact_mode")
-    st.caption("Compact mode collapses sections + reduces scrolling.")
-
-    with st.expander("🔒 Owner Mode", expanded=False):
-        st.caption("Tip: set `ADMIN_PIN` env var to hide admin tools from customers.")
-        pin_input = st.text_input("Enter PIN", type="password", placeholder="Owner PIN")
-        if ADMIN_PIN and pin_input and pin_input == ADMIN_PIN:
-            is_owner = True
-            st.success("Owner mode enabled ✅")
-
-    st.markdown("---")
-
-    if is_owner:
-        st.markdown("### ⚙️ Settings (Owner)")
-        cfg["app_name"] = st.text_input("App name", value=cfg.get("app_name", DEFAULT_CONFIG["app_name"]))
-        cfg["tagline"] = st.text_input("Tagline", value=cfg.get("tagline", DEFAULT_CONFIG["tagline"]))
-        cfg["accent_color"] = st.color_picker("Accent color", value=cfg.get("accent_color", DEFAULT_CONFIG["accent_color"]))
-        cfg["logo_size"] = st.slider("Logo size", 40, 120, value=int(cfg.get("logo_size", 56)), step=2)
-        cfg["show_how_it_works_tab"] = st.toggle("Show “How it works” tab", value=bool(cfg.get("show_how_it_works_tab", True)))
-
-        uploaded = st.file_uploader("Upload logo (PNG)", type=["png"], help="Owner-only. Overrides other logo sources.")
-        if uploaded is not None:
-            try:
-                LOGO_OVERRIDE_PATH.write_bytes(uploaded.read())
-                st.success("Logo uploaded ✅ (saved to data/logo_override.png)")
-            except Exception as e:
-                st.error(f"Could not save logo: {e}")
-
-        colA, colB = st.columns(2)
-        with colA:
-            if st.button("Save settings", use_container_width=True):
-                save_config(cfg)
-                st.success("Saved ✅ Refreshing…")
-                st.rerun()
-        with colB:
-            if st.button("Reset defaults", use_container_width=True):
-                save_config(DEFAULT_CONFIG)
-                st.warning("Reset. Refreshing…")
-                st.rerun()
-
-        st.markdown("---")
-        st.markdown("### 📊 Owner Dashboard")
-
-        stats = load_stats()
-
-        st.write(f"**Sessions:** {stats.get('sessions', 0)}")
-        st.write(f"**TikTok sessions:** {stats.get('tiktok_sessions', 0)}  *(supports `?src=tiktok` + `?utm_source=tiktok`)*")
-        st.write(f"**Profit checks:** {stats.get('profit_checks', 0)}")
-        st.write(f"**Listings generated:** {stats.get('listings_generated', 0)}")
-        st.write(f"**Emails captured:** {stats.get('emails_captured', 0)}")
-
-        st.markdown("#### Sessions by source")
-        sbs = stats.get("sessions_by_source", {})
-        cols = st.columns(3)
-        cols[0].metric("TikTok", int(sbs.get("tiktok", 0)))
-        cols[1].metric("Direct", int(sbs.get("direct", 0)))
-        cols[2].metric("Other", int(sbs.get("other", 0)))
-
-        st.download_button(
-            "Download stats.json",
-            data=json.dumps(stats, indent=2).encode("utf-8"),
-            file_name="stats.json",
-            mime="application/json",
-            use_container_width=True,
-        )
-
-        if EVENTS_PATH.exists():
-            st.download_button(
-                "Download events.jsonl",
-                data=EVENTS_PATH.read_bytes(),
-                file_name="events.jsonl",
-                mime="application/x-ndjson",
-                use_container_width=True,
-            )
-
-        if WAITLIST_CSV.exists():
-            st.download_button(
-                "Download waitlist.csv",
-                data=WAITLIST_CSV.read_bytes(),
-                file_name="waitlist.csv",
-                mime="text/csv",
-                use_container_width=True,
-            )
-        else:
-            st.caption("No waitlist yet (waitlist.csv appears after first signup).")
-
-    else:
-        st.caption("Free tool. No login. Built for fast flips.")
-        st.markdown("**Tracking tip (use this in TikTok bio):**")
-        st.code(
-            "https://YOUR_APP_URL/?utm_source=tiktok&utm_medium=social&utm_campaign=organic",
-            language=None,
-        )
-
-        st.markdown("---")
-        st.markdown("#### Get updates")
-        st.caption("Want Bulk Mode + Saved Checks? Join the waitlist (optional).")
-        email_side = st.text_input("Email", key="email_sidebar", placeholder="you@example.com")
-        if st.button("Join waitlist", use_container_width=True):
-            ok, msg = append_waitlist(email_side, source=st.session_state.get("traffic_source", "unknown"), note="sidebar")
-            (st.success(msg) if ok else st.warning(msg))
-
-
-# =========================
-# Header
-# =========================
-render_header_native(cfg)
-st.caption("Listings + Profit + **Flip Score**. Dark mode by default. ✅")
-
-
-# =========================
-# Tabs
-# =========================
-tabs = ["🧾 Listing Builder", "✅ Flip Checker", "🚀 Coming Soon"]
-if cfg.get("show_how_it_works_tab", True):
-    tabs.append("ℹ️ How it works")
-
-tab_objs = st.tabs(tabs)
-
-
-# =========================
-# Tab 1: Listing Builder
-# =========================
-with tab_objs[0]:
-    compact = bool(st.session_state.get("compact_mode", True))
-
-    left, right = st.columns([1.05, 0.95], gap="large")
-
-    with left:
-        st.markdown("### Build your listing")
-        st.caption("Pick a platform, fill the basics, and generate clean copy/paste output.")
-
-        with st.expander("0) Platform", expanded=not compact):
-            platform = st.selectbox("Platform", ["eBay", "Facebook Marketplace", "Mercari", "OfferUp"])
-
-        with st.expander("1) Item info", expanded=not compact):
-            col1, col2 = st.columns(2)
-            with col1:
-                brand = st.text_input("Brand", placeholder="Apple, DeWalt, Nike, etc.")
-                item = st.text_input("Item", placeholder="MacBook Pro, Drill, Sneakers, etc.")
-                model = st.text_input("Model / Part # (optional)", placeholder="A1990, DCD791, etc.")
-            with col2:
-                condition = st.selectbox(
-                    "Condition",
-                    ["New", "Open box", "Used - Like New", "Used - Good", "Used - Fair", "Used - Poor", "For parts/repair"],
-                )
-                category = st.text_input("Category (optional)", placeholder="Electronics, Tools, Shoes, Home, etc.")
-                qty = st.number_input("Quantity", min_value=1, max_value=100, value=1, step=1)
-
-        with st.expander("2) Features & notes", expanded=not compact):
-            colA, colB = st.columns([0.55, 0.45])
-            with colA:
-                features_lines = st.text_area(
-                    "Key features (one per line)",
-                    height=140 if not compact else 110,
-                    placeholder="Example:\n16GB RAM\n512GB SSD\nIncludes charger",
-                )
-                defects_lines = st.text_area(
-                    "Notes / defects (one per line)",
-                    height=120 if not compact else 95,
-                    placeholder="Example:\nSmall scratch on lid\nBattery service recommended\nNo original box",
-                )
-            with colB:
-                st.markdown("#### Quality helpers")
-                use_condition_template = st.toggle("Auto-add condition template text", value=True)
-                include_parts_repair_note = st.toggle("Extra protection text for parts/repair", value=True)
-
-                st.markdown("#### Photo checklist")
-                cat_lower = (category or "").lower()
-                if any(k in cat_lower for k in ["electronic", "laptop", "phone", "camera", "tablet", "console"]):
-                    bucket = "Electronics"
-                elif any(k in cat_lower for k in ["shoe", "sneaker", "shirt", "hoodie", "pants", "jacket"]):
-                    bucket = "Shoes/Clothing"
-                elif any(k in cat_lower for k in ["tool", "drill", "dewalt", "milwaukee", "saw"]):
-                    bucket = "Tools"
-                elif any(k in cat_lower for k in ["kitchen", "home", "decor", "plate", "mug", "bowl"]):
-                    bucket = "Home/Kitchen"
-                elif any(k in cat_lower for k in ["toy", "game", "puzzle", "lego"]):
-                    bucket = "Toys/Games"
-                else:
-                    bucket = "Other"
-
-                st.markdown(f'<span class="tf-pill">{bucket}</span>', unsafe_allow_html=True)
-                for it in PHOTO_CHECKLISTS[bucket]:
-                    st.write(f"- {it}")
-
-        with st.expander("3) Seller profile (auto-added)", expanded=not compact):
-            colA, colB = st.columns(2)
-            with colA:
-                seller_city = st.text_input("City/Area", value="Jacksonville, FL")
-                pickup_line = st.text_input("Pickup line", value="Porch pickup / meetup")
-                shipping_line = st.text_input("Shipping line", value="Ships within the US")
-            with colB:
-                handling_time = st.text_input("Handling time", value="Same or next business day")
-                returns_line = st.text_input("Returns policy line", value="No returns (ask questions before buying)")
-
-        st.markdown("---")
-        generate = st.button("Generate listing text", type="primary", use_container_width=True)
-
-        if generate:
-            bump_stat("listings_generated", 1)
-            log_event("listing_generated", {"platform": platform, "category": category, "condition": condition})
-
-            payload = build_listing_payload(
-                platform=platform,
-                brand=brand,
-                item=item,
-                model=model,
-                condition=condition,
-                category=category,
-                qty=int(qty),
-                features_lines=features_lines,
-                defects_lines=defects_lines,
-                seller_city=seller_city,
-                pickup_line=pickup_line,
-                shipping_line=shipping_line,
-                handling_time=handling_time,
-                returns_line=returns_line,
-                include_parts_repair_note=include_parts_repair_note,
-                use_condition_template=use_condition_template,
-            )
-            st.session_state["last_listing"] = payload
-
-    with right:
-        st.markdown("### Output")
-        st.caption("Clean cards with one-tap copy (works great on phones).")
-
-        payload = st.session_state.get("last_listing")
-        if not payload:
-            st.info("Fill out the item and click **Generate listing text**.")
-        else:
-            variants = payload.get("title_variants") or [payload.get("title", "Item for sale")]
-            selected = st.selectbox(
-                "Choose a title (optimizer)",
-                options=variants,
-                index=0,
-                help="Pick the best keyword order. Aim for ≤ 80 characters for eBay.",
-            )
-            payload["title"] = selected
-
-            platform = payload.get("platform", "eBay")
-            desc = platform_description(
-                platform=platform,
-                title=payload["title"],
-                condition=condition,
-                category=category,
-                qty=int(qty),
-                features=payload.get("features", []),
-                defects=payload.get("defects", []),
-                seller_city=seller_city,
-                pickup_line=pickup_line,
-                shipping_line=shipping_line,
-                handling_time=handling_time,
-                returns_line=returns_line,
-                parts_repair_note=payload.get("parts_repair_note", ""),
-            )
-            payload["desc"] = desc
-            st.session_state["last_listing"] = payload
-
-            title_len = len(payload["title"])
-            title_fit = "✅ Fits eBay (≤80)" if title_len <= 80 else "⚠️ Over 80 chars"
-
-            def _title_card():
-                st.write(f"**Length:** {title_len} • {title_fit}")
-                st.text_area("title_out", value=payload["title"], height=80, label_visibility="collapsed")
-                c1, c2 = st.columns([0.55, 0.45])
-                with c1:
-                    copy_btn("Copy title", payload["title"], key="copy_title_btn")
-                with c2:
-                    st.download_button(
-                        "Download title (.txt)",
-                        data=(payload["title"] + "\n").encode("utf-8"),
-                        file_name="title.txt",
-                        mime="text/plain",
-                        use_container_width=True,
-                    )
-
-            def _desc_card():
-                st.text_area("desc_out", value=payload["desc"], height=260 if not compact else 210, label_visibility="collapsed")
-                c1, c2 = st.columns([0.55, 0.45])
-                with c1:
-                    copy_btn("Copy description", payload["desc"], key="copy_desc_btn")
-                with c2:
-                    st.download_button(
-                        "Download description (.txt)",
-                        data=payload["desc"].encode("utf-8"),
-                        file_name=f"{payload.get('platform','platform').replace(' ','_').lower()}_description.txt",
-                        mime="text/plain",
-                        use_container_width=True,
-                    )
-
-            card("Title", _title_card)
-            card(f"Description ({payload.get('platform','eBay')})", _desc_card)
-
-            st.markdown("---")
-            all_text = f"TITLE:\n{payload['title']}\n\nDESCRIPTION ({payload.get('platform','eBay')}):\n{payload['desc']}\n"
-            copy_btn("Copy ALL (title + description)", all_text, key="copy_all_listing_btn")
-
-    st.markdown("---")
-    st.markdown("### Get updates (optional)")
-    st.caption("Want Bulk Mode / Saved Checks? Join the waitlist. No spam.")
-    colw1, colw2 = st.columns([0.6, 0.4])
-    with colw1:
-        email_main = st.text_input("Email address", key="email_main", placeholder="you@example.com")
-    with colw2:
-        if st.button("Join waitlist", key="join_waitlist_main", use_container_width=True):
-            ok, msg = append_waitlist(email_main, source=st.session_state.get("traffic_source", "unknown"), note="main_footer")
-            (st.success(msg) if ok else st.warning(msg))
-
+    }          
 
 # =========================
 # Tab 2: Flip Checker
@@ -1407,7 +1049,10 @@ with tab_objs[1]:
     st.markdown("---")
     if st.button("Calculate profit", type="primary", use_container_width=True):
         bump_stat("profit_checks", 1)
-        log_event("profit_checked", {"sale_price": sale_price, "cogs": cogs, "shipping_method": shipping_method, "preset": preset})
+        log_event(
+            "profit_checked",
+            {"sale_price": sale_price, "cogs": cogs, "shipping_method": shipping_method, "preset": preset},
+        )
 
         result = calc_profit(
             sale_price=sale_price,
@@ -1493,11 +1138,11 @@ with tab_objs[2]:
     st.markdown("### Planned Pro features (not live yet)")
     st.markdown(
         """
-- 💾 **Saved Profit Checks** (history + notes per item)  
-- ⚡ **Bulk Mode** (check 5–20 items at once)  
-- 📦 **Inventory Tracker** (buy price, sold price, net profit)  
-- 📁 **CSV Exports** (taxes + bookkeeping)  
-- 🧠 **Smarter Flip Score** presets (time-to-sell vs max profit)  
+- 💾 **Saved Profit Checks** (history + notes per item)
+- ⚡ **Bulk Mode** (check 5–20 items at once)
+- 📦 **Inventory Tracker** (buy price, sold price, net profit)
+- 📁 **CSV Exports** (taxes + bookkeeping)
+- 🧠 **Smarter Flip Score** presets (time-to-sell vs max profit)
         """.strip()
     )
 
@@ -1507,10 +1152,18 @@ with tab_objs[2]:
     colx, coly = st.columns([0.7, 0.3])
     with colx:
         email_cs = st.text_input("Email", key="email_comingsoon", placeholder="you@example.com")
-        note_cs = st.text_input("What feature do you want most? (optional)", key="note_comingsoon", placeholder="Saved checks, bulk mode, exports…")
+        note_cs = st.text_input(
+            "What feature do you want most? (optional)",
+            key="note_comingsoon",
+            placeholder="Saved checks, bulk mode, exports…",
+        )
     with coly:
         if st.button("Join waitlist", key="join_waitlist_cs", use_container_width=True):
-            ok, msg = append_waitlist(email_cs, source=st.session_state.get("traffic_source", "unknown"), note=note_cs)
+            ok, msg = append_waitlist(
+                email_cs,
+                source=st.session_state.get("traffic_source", "unknown"),
+                note=note_cs,
+            )
             (st.success(msg) if ok else st.warning(msg))
 
     st.markdown("---")
