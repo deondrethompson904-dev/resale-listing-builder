@@ -57,6 +57,42 @@ APP_VERSION = "v1.3"
 
 
 # =========================
+# Widget keys (stable reset support)
+# =========================
+# Listing Builder keys
+LB_PLATFORM = "lb_platform"
+LB_BRAND = "lb_brand"
+LB_ITEM = "lb_item"
+LB_MODEL = "lb_model"
+LB_CONDITION = "lb_condition"
+LB_CATEGORY = "lb_category"
+LB_QTY = "lb_qty"
+LB_FEATURES = "lb_features"
+LB_DEFECTS = "lb_defects"
+LB_USE_COND_TMPL = "lb_use_condition_template"
+LB_INCLUDE_PARTS_NOTE = "lb_include_parts_note"
+LB_SELLER_CITY = "lb_seller_city"
+LB_PICKUP = "lb_pickup_line"
+LB_SHIPPING = "lb_shipping_line"
+LB_HANDLING = "lb_handling_time"
+LB_RETURNS = "lb_returns_line"
+LB_TITLE_PICK = "lb_title_pick"
+
+# Flip Checker keys
+FC_PRESET = "fc_preset"
+FC_SALE_PRICE = "fc_sale_price"
+FC_COGS = "fc_cogs"
+FC_PACKAGING = "fc_packaging_cost"
+FC_SHIP_METHOD = "fc_shipping_method"
+FC_WEIGHT = "fc_weight"
+FC_MANUAL_SHIP = "fc_manual_shipping"
+FC_SHIP_COST = "fc_shipping_cost"
+FC_PLATFORM_FEE = "fc_platform_fee_pct"
+FC_PROCESSING_PCT = "fc_processing_pct"
+FC_PROCESSING_FIXED = "fc_processing_fixed"
+
+
+# =========================
 # Helpers: JSON + counters
 # =========================
 def _read_json(path: pathlib.Path, default: Dict[str, Any]) -> Dict[str, Any]:
@@ -1012,6 +1048,58 @@ def build_listing_payload(
 
 
 # =========================
+# Reset helpers (ONE FIX: Reset buttons)
+# =========================
+def _reset_keys(keys: List[str]) -> None:
+    for k in keys:
+        st.session_state.pop(k, None)
+
+
+def reset_listing_builder() -> None:
+    _reset_keys(
+        [
+            LB_PLATFORM,
+            LB_BRAND,
+            LB_ITEM,
+            LB_MODEL,
+            LB_CONDITION,
+            LB_CATEGORY,
+            LB_QTY,
+            LB_FEATURES,
+            LB_DEFECTS,
+            LB_USE_COND_TMPL,
+            LB_INCLUDE_PARTS_NOTE,
+            LB_SELLER_CITY,
+            LB_PICKUP,
+            LB_SHIPPING,
+            LB_HANDLING,
+            LB_RETURNS,
+            LB_TITLE_PICK,
+        ]
+    )
+    st.session_state.pop("last_listing", None)
+
+
+def reset_flip_checker() -> None:
+    _reset_keys(
+        [
+            FC_PRESET,
+            FC_SALE_PRICE,
+            FC_COGS,
+            FC_PACKAGING,
+            FC_SHIP_METHOD,
+            FC_WEIGHT,
+            FC_MANUAL_SHIP,
+            FC_SHIP_COST,
+            FC_PLATFORM_FEE,
+            FC_PROCESSING_PCT,
+            FC_PROCESSING_FIXED,
+        ]
+    )
+    st.session_state.pop("last_profit", None)
+
+
+# =========================
 # App boot
 # =========================
 st.set_page_config(
@@ -1193,21 +1281,22 @@ with tab_objs[0]:
         st.caption("Pick a platform, fill the basics, and generate clean copy/paste output.")
 
         with st.expander("0) Platform", expanded=not compact):
-            platform = st.selectbox("Platform", ["eBay", "Facebook Marketplace", "Mercari", "OfferUp"])
+            platform = st.selectbox("Platform", ["eBay", "Facebook Marketplace", "Mercari", "OfferUp"], key=LB_PLATFORM)
 
         with st.expander("1) Item info", expanded=not compact):
             col1, col2 = st.columns(2)
             with col1:
-                brand = st.text_input("Brand", placeholder="Apple, DeWalt, Nike, etc.")
-                item = st.text_input("Item", placeholder="MacBook Pro, Drill, Sneakers, etc.")
-                model = st.text_input("Model / Part # (optional)", placeholder="A1990, DCD791, etc.")
+                brand = st.text_input("Brand", placeholder="Apple, DeWalt, Nike, etc.", key=LB_BRAND)
+                item = st.text_input("Item", placeholder="MacBook Pro, Drill, Sneakers, etc.", key=LB_ITEM)
+                model = st.text_input("Model / Part # (optional)", placeholder="A1990, DCD791, etc.", key=LB_MODEL)
             with col2:
                 condition = st.selectbox(
                     "Condition",
                     ["New", "Open box", "Used - Like New", "Used - Good", "Used - Fair", "Used - Poor", "For parts/repair"],
+                    key=LB_CONDITION,
                 )
-                category = st.text_input("Category (optional)", placeholder="Electronics, Tools, Shoes, Home, etc.")
-                qty = st.number_input("Quantity", min_value=1, max_value=100, value=1, step=1)
+                category = st.text_input("Category (optional)", placeholder="Electronics, Tools, Shoes, Home, etc.", key=LB_CATEGORY)
+                qty = st.number_input("Quantity", min_value=1, max_value=100, value=1, step=1, key=LB_QTY)
 
         with st.expander("2) Features & notes", expanded=not compact):
             colA, colB = st.columns([0.55, 0.45])
@@ -1216,16 +1305,18 @@ with tab_objs[0]:
                     "Key features (one per line)",
                     height=140 if not compact else 110,
                     placeholder="Example:\n16GB RAM\n512GB SSD\nIncludes charger",
+                    key=LB_FEATURES,
                 )
                 defects_lines = st.text_area(
                     "Notes / defects (one per line)",
                     height=120 if not compact else 95,
                     placeholder="Example:\nSmall scratch on lid\nBattery service recommended\nNo original box",
+                    key=LB_DEFECTS,
                 )
             with colB:
                 st.markdown("#### Quality helpers")
-                use_condition_template = st.toggle("Auto-add condition template text", value=True)
-                include_parts_repair_note = st.toggle("Extra protection text for parts/repair", value=True)
+                use_condition_template = st.toggle("Auto-add condition template text", value=True, key=LB_USE_COND_TMPL)
+                include_parts_repair_note = st.toggle("Extra protection text for parts/repair", value=True, key=LB_INCLUDE_PARTS_NOTE)
 
                 st.markdown("#### Photo checklist")
                 cat_lower = (category or "").lower()
@@ -1249,15 +1340,21 @@ with tab_objs[0]:
         with st.expander("3) Seller profile (auto-added)", expanded=not compact):
             colA, colB = st.columns(2)
             with colA:
-                seller_city = st.text_input("City/Area", value="Jacksonville, FL")
-                pickup_line = st.text_input("Pickup line", value="Porch pickup / meetup")
-                shipping_line = st.text_input("Shipping line", value="Ships within the US")
+                seller_city = st.text_input("City/Area", value="Jacksonville, FL", key=LB_SELLER_CITY)
+                pickup_line = st.text_input("Pickup line", value="Porch pickup / meetup", key=LB_PICKUP)
+                shipping_line = st.text_input("Shipping line", value="Ships within the US", key=LB_SHIPPING)
             with colB:
-                handling_time = st.text_input("Handling time", value="Same or next business day")
-                returns_line = st.text_input("Returns policy line", value="No returns (ask questions before buying)")
+                handling_time = st.text_input("Handling time", value="Same or next business day", key=LB_HANDLING)
+                returns_line = st.text_input("Returns policy line", value="No returns (ask questions before buying)", key=LB_RETURNS)
 
         st.markdown("---")
-        generate = st.button("Generate listing text", type="primary", use_container_width=True)
+        cbtn1, cbtn2 = st.columns([0.45, 0.55])
+        with cbtn1:
+            if st.button("Reset", use_container_width=True):
+                reset_listing_builder()
+                st.rerun()
+        with cbtn2:
+            generate = st.button("Generate listing text", type="primary", use_container_width=True)
 
         if generate:
             bump_stat("listings_generated", 1)
@@ -1296,24 +1393,25 @@ with tab_objs[0]:
                 "Choose a title (optimizer)",
                 options=variants,
                 index=0,
+                key=LB_TITLE_PICK,
                 help="Pick the best keyword order. Aim for ≤ 80 characters for eBay.",
             )
             payload["title"] = selected
 
-            platform = payload.get("platform", "eBay")
+            platform_out = payload.get("platform", "eBay")
             desc = platform_description(
-                platform=platform,
+                platform=platform_out,
                 title=payload["title"],
-                condition=condition,
-                category=category,
-                qty=int(qty),
+                condition=st.session_state.get(LB_CONDITION, "Used - Good"),
+                category=st.session_state.get(LB_CATEGORY, ""),
+                qty=int(st.session_state.get(LB_QTY, 1)),
                 features=payload.get("features", []),
                 defects=payload.get("defects", []),
-                seller_city=seller_city,
-                pickup_line=pickup_line,
-                shipping_line=shipping_line,
-                handling_time=handling_time,
-                returns_line=returns_line,
+                seller_city=st.session_state.get(LB_SELLER_CITY, "Jacksonville, FL"),
+                pickup_line=st.session_state.get(LB_PICKUP, "Porch pickup / meetup"),
+                shipping_line=st.session_state.get(LB_SHIPPING, "Ships within the US"),
+                handling_time=st.session_state.get(LB_HANDLING, "Same or next business day"),
+                returns_line=st.session_state.get(LB_RETURNS, "No returns (ask questions before buying)"),
                 parts_repair_note=payload.get("parts_repair_note", ""),
             )
             payload["desc"] = desc
@@ -1338,7 +1436,8 @@ with tab_objs[0]:
                     )
 
             def _desc_card():
-                st.text_area("desc_out", value=payload["desc"], height=260 if not compact else 210, label_visibility="collapsed")
+                compact_local = bool(st.session_state.get("compact_mode", True))
+                st.text_area("desc_out", value=payload["desc"], height=260 if not compact_local else 210, label_visibility="collapsed")
                 c1, c2 = st.columns([0.55, 0.45])
                 with c1:
                     copy_btn("Copy description", payload["desc"], key="copy_desc_btn")
@@ -1388,6 +1487,7 @@ with tab_objs[1]:
             "Local pickup (no shipping)",
             "Custom",
         ],
+        key=FC_PRESET,
     )
 
     if preset == "Facebook Marketplace (no platform fee)":
@@ -1409,11 +1509,11 @@ with tab_objs[1]:
     with st.expander("1) Sale + cost", expanded=not compact):
         c1, c2, c3 = st.columns(3)
         with c1:
-            sale_price = st.number_input("Target sale price ($)", min_value=0.0, value=79.99, step=1.0)
+            sale_price = st.number_input("Target sale price ($)", min_value=0.0, value=79.99, step=1.0, key=FC_SALE_PRICE)
         with c2:
-            cogs = st.number_input("Your cost (COGS) ($)", min_value=0.0, value=25.00, step=1.0)
+            cogs = st.number_input("Your cost (COGS) ($)", min_value=0.0, value=25.00, step=1.0, key=FC_COGS)
         with c3:
-            packaging_cost = st.number_input("Packaging cost ($)", min_value=0.0, value=1.50, step=0.25)
+            packaging_cost = st.number_input("Packaging cost ($)", min_value=0.0, value=1.50, step=0.25, key=FC_PACKAGING)
 
     with st.expander("2) Shipping", expanded=not compact):
         c1, c2, c3 = st.columns(3)
@@ -1422,14 +1522,15 @@ with tab_objs[1]:
                 "Shipping method",
                 ["Ground (est.)", "Priority (est.)", "Local pickup"],
                 index=["Ground (est.)", "Priority (est.)", "Local pickup"].index(preset_ship_method),
+                key=FC_SHIP_METHOD,
             )
         with c2:
-            weight = st.number_input("Estimated weight (lb)", min_value=0.0, value=2.0, step=0.25)
+            weight = st.number_input("Estimated weight (lb)", min_value=0.0, value=2.0, step=0.25, key=FC_WEIGHT)
         with c3:
-            manual_shipping = st.toggle("Manually enter shipping cost", value=False)
+            manual_shipping = st.toggle("Manually enter shipping cost", value=False, key=FC_MANUAL_SHIP)
 
         if manual_shipping:
-            shipping_cost = st.number_input("Shipping cost ($)", min_value=0.0, value=8.00, step=0.5)
+            shipping_cost = st.number_input("Shipping cost ($)", min_value=0.0, value=8.00, step=0.5, key=FC_SHIP_COST)
         else:
             shipping_cost = shipping_estimate(shipping_method, weight)
             st.caption(f"Estimated shipping: **{money(shipping_cost)}**")
@@ -1443,6 +1544,7 @@ with tab_objs[1]:
                 max_value=30.0,
                 value=float(preset_platform_fee) if preset != "Custom" else 13.25,
                 step=0.25,
+                key=FC_PLATFORM_FEE,
             )
         with c2:
             processing_pct = st.number_input(
@@ -1451,6 +1553,7 @@ with tab_objs[1]:
                 max_value=10.0,
                 value=float(preset_processing_pct) if preset != "Custom" else 2.90,
                 step=0.10,
+                key=FC_PROCESSING_PCT,
             )
         with c3:
             processing_fixed = st.number_input(
@@ -1459,10 +1562,19 @@ with tab_objs[1]:
                 max_value=2.0,
                 value=float(preset_processing_fixed) if preset != "Custom" else 0.30,
                 step=0.05,
+                key=FC_PROCESSING_FIXED,
             )
 
     st.markdown("---")
-    if st.button("Calculate profit", type="primary", use_container_width=True):
+    b1, b2 = st.columns([0.42, 0.58])
+    with b1:
+        if st.button("Reset", use_container_width=True, key="fc_reset_btn"):
+            reset_flip_checker()
+            st.rerun()
+    with b2:
+        calc_btn = st.button("Calculate profit", type="primary", use_container_width=True, key="fc_calc_btn")
+
+    if calc_btn:
         bump_stat("profit_checks", 1)
         log_event("profit_checked", {"sale_price": sale_price, "cogs": cogs, "shipping_method": shipping_method, "preset": preset})
 
