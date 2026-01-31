@@ -53,7 +53,7 @@ DEFAULT_STATS = {
     },
 }
 
-APP_VERSION = "v1.3"
+APP_VERSION = "v1.4"  # typography + reset buttons
 
 
 # =========================
@@ -641,6 +641,75 @@ def inject_css(accent: str) -> None:
               padding-right: 0.8rem;
             }}
           }}
+
+          /* ===== Modern typography + hierarchy pass ===== */
+          :root {{
+            --h1: 1.55rem;
+            --h2: 1.28rem;
+            --h3: 1.12rem;
+            --body: 1.00rem;
+            --small: 0.92rem;
+            --xs: 0.86rem;
+          }}
+
+          html, body {{
+            font-size: 16px !important;
+            line-height: 1.45 !important;
+            letter-spacing: 0.1px;
+          }}
+
+          /* Headings */
+          h1 {{ font-size: var(--h1) !important; font-weight: 900 !important; letter-spacing: -0.2px; }}
+          h2 {{ font-size: var(--h2) !important; font-weight: 850 !important; }}
+          h3 {{ font-size: var(--h3) !important; font-weight: 800 !important; }}
+          p, li {{ font-size: var(--body) !important; }}
+
+          /* Streamlit labels + captions */
+          label, .stMarkdown label {{
+            font-weight: 750 !important;
+            font-size: var(--small) !important;
+            color: var(--text) !important;
+          }}
+          [data-testid="stCaptionContainer"] {{
+            font-size: var(--xs) !important;
+            opacity: 0.95;
+          }}
+
+          /* Cleaner input spacing */
+          .stTextInput, .stTextArea, .stNumberInput, .stSelectbox {{
+            margin-bottom: 0.35rem !important;
+          }}
+
+          /* Textareas/panels look more premium */
+          .stTextArea textarea, .stTextInput input, .stNumberInput input {{
+            box-shadow: 0 10px 26px rgba(0,0,0,0.22);
+          }}
+
+          /* Make output areas feel like “cards” */
+          [data-testid="stTextArea"] textarea {{
+            background: rgba(255,255,255,0.035) !important;
+            border: 1px solid rgba(255,255,255,0.16) !important;
+          }}
+
+          /* Expander header polish */
+          details summary {{
+            font-weight: 800 !important;
+            color: var(--text) !important;
+          }}
+          details summary:hover {{
+            filter: brightness(1.1);
+          }}
+
+          /* Tabs: tighter + more modern */
+          .stTabs [data-baseweb="tab"] {{
+            font-weight: 750 !important;
+          }}
+
+          /* Mobile: slightly larger text + touch targets */
+          @media (max-width: 640px) {{
+            html, body {{ font-size: 16.5px !important; }}
+            div.stButton > button {{ padding: 0.78rem 0.95rem !important; }}
+          }}
         </style>
         """,
         unsafe_allow_html=True,
@@ -1048,7 +1117,7 @@ def build_listing_payload(
 
 
 # =========================
-# Reset helpers (ONE FIX: Reset buttons)
+# Reset helpers
 # =========================
 def _reset_keys(keys: List[str]) -> None:
     for k in keys:
@@ -1350,11 +1419,11 @@ with tab_objs[0]:
         st.markdown("---")
         cbtn1, cbtn2 = st.columns([0.45, 0.55])
         with cbtn1:
-            if st.button("Reset", use_container_width=True):
+            if st.button("Reset", use_container_width=True, key="lb_reset_btn"):
                 reset_listing_builder()
                 st.rerun()
         with cbtn2:
-            generate = st.button("Generate listing text", type="primary", use_container_width=True)
+            generate = st.button("Generate listing text", type="primary", use_container_width=True, key="lb_generate_btn")
 
         if generate:
             bump_stat("listings_generated", 1)
@@ -1437,7 +1506,12 @@ with tab_objs[0]:
 
             def _desc_card():
                 compact_local = bool(st.session_state.get("compact_mode", True))
-                st.text_area("desc_out", value=payload["desc"], height=260 if not compact_local else 210, label_visibility="collapsed")
+                st.text_area(
+                    "desc_out",
+                    value=payload["desc"],
+                    height=260 if not compact_local else 210,
+                    label_visibility="collapsed",
+                )
                 c1, c2 = st.columns([0.55, 0.45])
                 with c1:
                     copy_btn("Copy description", payload["desc"], key="copy_desc_btn")
@@ -1465,7 +1539,11 @@ with tab_objs[0]:
         email_main = st.text_input("Email address", key="email_main", placeholder="you@example.com")
     with colw2:
         if st.button("Join waitlist", key="join_waitlist_main", use_container_width=True):
-            ok, msg = append_waitlist(email_main, source=st.session_state.get("traffic_source", "unknown"), note="main_footer")
+            ok, msg = append_waitlist(
+                email_main,
+                source=st.session_state.get("traffic_source", "unknown"),
+                note="main_footer",
+            )
             (st.success(msg) if ok else st.warning(msg))
 
 
@@ -1704,11 +1782,10 @@ if cfg.get("show_how_it_works_tab", True):
   - processing fee %
   - shipping + packaging
 
-### v1.3 update
-- Cleaner UX: compact mode + output cards + copy buttons
-- Title optimizer (variants + 80-char helper)
-- Platform switch outputs
-- Condition templates + photo checklist
+### v1.4 update
+- Reset buttons (Listing Builder + Flip Checker)
+- Modern typography + hierarchy polish (less “basic” look)
+- Stable widget keys for reliable clearing
 - Android/iOS readability fixes + solid sidebar/control panel
 
 ### Privacy
