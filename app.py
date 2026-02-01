@@ -11,6 +11,16 @@ import streamlit as st
 import streamlit.components.v1 as components
 
 
+# =====================================================
+# Resale Listing Builder (v1.5.1)
+# - Emoji-safe UI (no raw emoji chars in UI strings)
+# - Smarter title rules + labeled variants
+# - Live preview while typing (no counters)
+# - Reset buttons
+# - Modern visual polish (cards, badges, spacing, mobile)
+# =====================================================
+
+
 # =========================
 # File storage (Streamlit Cloud-friendly)
 # =========================
@@ -38,7 +48,7 @@ DEFAULT_STATS = {
     "created_at": None,
     "updated_at": None,
     "sessions": 0,
-    "tiktok_sessions": 0,  # kept for compatibility
+    "tiktok_sessions": 0,
     "profit_checks": 0,
     "listings_generated": 0,
     "emails_captured": 0,
@@ -53,7 +63,7 @@ DEFAULT_STATS = {
     },
 }
 
-APP_VERSION = "v1.5"  # title rules + labeled variants + live preview while typing
+APP_VERSION = "v1.5.1"  # emoji-safe UI + polish
 
 
 # =========================
@@ -156,7 +166,6 @@ def bump_stat(key: str, n: int = 1) -> None:
 # Event logging (lightweight)
 # =========================
 def log_event(event: str, props: Optional[Dict[str, Any]] = None) -> None:
-    """Append one JSON event per line to data/events.jsonl (safe + simple)."""
     try:
         payload = {
             "ts_utc": dt.datetime.utcnow().isoformat(),
@@ -186,7 +195,7 @@ def is_valid_email(email: str) -> bool:
 def append_waitlist(email: str, source: str = "", note: str = "") -> Tuple[bool, str]:
     email = normalize_email(email)
     if not is_valid_email(email):
-        return False, "That doesnât look like a valid email."
+        return False, "That does not look like a valid email."
 
     new_file = not WAITLIST_CSV.exists()
     if new_file:
@@ -196,7 +205,7 @@ def append_waitlist(email: str, source: str = "", note: str = "") -> Tuple[bool,
     for line in existing:
         parts = line.split(",")
         if len(parts) >= 2 and normalize_email(parts[1]) == email:
-            return False, "Youâre already on the list â"
+            return False, "You are already on the list."
 
     ts = dt.datetime.utcnow().isoformat()
     safe_source = (source or "").replace(",", " ").strip()
@@ -206,14 +215,13 @@ def append_waitlist(email: str, source: str = "", note: str = "") -> Tuple[bool,
 
     bump_stat("emails_captured", 1)
     log_event("waitlist_joined", {"note": safe_note})
-    return True, "Youâre on the waitlist â"
+    return True, "Added. You are on the waitlist."
 
 
 # =========================
 # Helpers: query tracking (src + UTMs)
 # =========================
 def _qp_get(qp: Any, key: str) -> str:
-    """Compatible getter for Streamlit query params across versions."""
     try:
         val = qp.get(key, "")
         if isinstance(val, list):
@@ -224,11 +232,6 @@ def _qp_get(qp: Any, key: str) -> str:
 
 
 def get_query_context() -> Dict[str, str]:
-    """
-    Supports:
-      - legacy: ?src=tiktok
-      - standard: ?utm_source=tiktok&utm_medium=social&utm_campaign=organic
-    """
     try:
         qp = st.query_params
     except Exception:
@@ -244,7 +247,6 @@ def get_query_context() -> Dict[str, str]:
     raw = src or utm_source or ""
     traffic_source = raw if raw else "direct"
 
-    # Normalize common sources
     if traffic_source in ("tt", "tik", "tiktokapp"):
         traffic_source = "tiktok"
 
@@ -278,7 +280,7 @@ def source_bucket(traffic_source: str) -> str:
 
 
 # =========================
-# Helpers: logo (FIXED + CLEAN HEADER SUPPORT)
+# Helpers: logo
 # =========================
 def read_file_bytes(path: pathlib.Path) -> Optional[bytes]:
     try:
@@ -290,15 +292,6 @@ def read_file_bytes(path: pathlib.Path) -> Optional[bytes]:
 
 
 def get_logo_source() -> Tuple[Optional[str], Optional[bytes], Optional[str]]:
-    """
-    Priority:
-      1) LOGO_URL env var (remote URL)
-      2) data/logo_override.png
-      3) assets/logo.png
-      4) assets/logo.svg
-      5) None (fallback badge)
-    Returns: (logo_url, logo_bytes, mime)
-    """
     logo_url = (os.getenv("LOGO_URL", "") or "").strip()
     if logo_url:
         return logo_url, None, None
@@ -351,7 +344,7 @@ def _clipboard_js(text: str) -> str:
 def copy_btn(label: str, text: str, key: str) -> None:
     if st.button(label, key=key, use_container_width=True):
         components.html(_clipboard_js(text), height=0)
-        toast("Copied â")
+        toast("Copied")
 
 
 def card(title: str, body_fn) -> None:
@@ -361,7 +354,7 @@ def card(title: str, body_fn) -> None:
 
 
 # =========================
-# Styling (dark theme + modern typography)
+# Styling (dark theme + modern typography + polish)
 # =========================
 def inject_css(accent: str) -> None:
     st.markdown(
@@ -373,6 +366,7 @@ def inject_css(accent: str) -> None:
             --sidebar: #070A0F;
             --sidebar2: #0A111A;
             --card: rgba(255,255,255,0.04);
+            --card2: rgba(255,255,255,0.06);
             --border: rgba(255,255,255,0.14);
             --border2: rgba(255,255,255,0.20);
             --text: #F3F4F6;
@@ -430,27 +424,16 @@ def inject_css(accent: str) -> None:
             color: var(--muted) !important;
           }}
 
-          [data-testid="stMarkdownContainer"] * {{
-            color: var(--text) !important;
-          }}
-          [data-testid="stCaptionContainer"] * {{
-            color: var(--muted) !important;
-          }}
+          [data-testid="stMarkdownContainer"] * {{ color: var(--text) !important; }}
+          [data-testid="stCaptionContainer"] * {{ color: var(--muted) !important; }}
 
           label, .stMarkdown label {{
-            font-weight: 750 !important;
+            font-weight: 760 !important;
             font-size: var(--small) !important;
             color: var(--text) !important;
           }}
-          [data-testid="stCaptionContainer"] {{
-            font-size: var(--xs) !important;
-            opacity: 0.95;
-          }}
 
-          .stTextInput, .stTextArea, .stNumberInput, .stSelectbox {{
-            margin-bottom: 0.35rem !important;
-          }}
-
+          /* Inputs */
           .stTextInput > div > div > input,
           .stNumberInput > div > div > input,
           .stTextArea textarea {{
@@ -467,13 +450,14 @@ def inject_css(accent: str) -> None:
             color: var(--text) !important;
           }}
 
+          /* Buttons */
           div.stButton > button {{
             border-radius: 14px !important;
             border: 1px solid var(--border2) !important;
             background: rgba(255,255,255,0.06) !important;
             color: var(--text) !important;
-            padding: 0.70rem 0.95rem !important;
-            font-weight: 650 !important;
+            padding: 0.72rem 0.95rem !important;
+            font-weight: 700 !important;
           }}
           div.stButton > button:hover {{
             border-color: rgba(255,255,255,0.26) !important;
@@ -486,6 +470,7 @@ def inject_css(accent: str) -> None:
             color: #07110A !important;
           }}
 
+          /* Tabs */
           .stTabs [data-baseweb="tab-list"] {{
             gap: 10px;
             padding: 8px;
@@ -499,7 +484,7 @@ def inject_css(accent: str) -> None:
             padding-left: 14px;
             padding-right: 14px;
             color: var(--muted) !important;
-            font-weight: 750 !important;
+            font-weight: 780 !important;
           }}
           .stTabs [aria-selected="true"] {{
             background: rgba(255,255,255,0.08) !important;
@@ -507,64 +492,44 @@ def inject_css(accent: str) -> None:
             border: 1px solid rgba(255,255,255,0.12) !important;
           }}
 
-          [data-testid="stMetric"] {{
-            background: rgba(255,255,255,0.04);
-            border: 1px solid var(--border);
-            border-radius: var(--radius);
-            padding: 14px 14px;
-          }}
-          [data-testid="stMetric"] * {{
-            color: var(--text) !important;
-          }}
-
-          details {{
-            background: rgba(255,255,255,0.03);
-            border: 1px solid var(--border);
-            border-radius: var(--radius);
-            padding: 8px 10px;
-          }}
-          details summary {{
-            font-weight: 800 !important;
-            color: var(--text) !important;
-          }}
-
-          pre {{
-            background: rgba(255,255,255,0.04) !important;
-            border: 1px solid var(--border) !important;
-            border-radius: var(--radius) !important;
-            box-shadow: none !important;
-          }}
-          pre, code {{
-            color: var(--text) !important;
-          }}
-
+          /* Cards */
           .tf-card {{
-            background: var(--card);
+            background: linear-gradient(180deg, rgba(255,255,255,0.05), rgba(255,255,255,0.03));
             border: 1px solid var(--border);
             border-radius: var(--radius);
             padding: 14px 14px;
             margin: 10px 0;
           }}
           .tf-card-title {{
-            font-weight: 800;
-            font-size: 1.05rem;
+            font-weight: 900;
+            font-size: 1.02rem;
             margin-bottom: 10px;
+            display:flex;
+            align-items:center;
+            justify-content:space-between;
+            gap:10px;
           }}
-          .tf-pill {{
-            display:inline-block;
-            padding: 4px 10px;
+          .tf-subtle {{ color: var(--muted); font-size: var(--xs); font-weight: 650; }}
+
+          .tf-badge {{
+            display:inline-flex;
+            align-items:center;
+            gap: 8px;
+            padding: 6px 10px;
             border-radius: 999px;
-            background: rgba(255,255,255,0.06);
             border: 1px solid rgba(255,255,255,0.14);
+            background: rgba(255,255,255,0.05);
             color: var(--muted);
             font-size: 0.85rem;
+            white-space: nowrap;
+          }}
+          .tf-badge-dot {{
+            width: 8px; height: 8px; border-radius: 999px;
+            background: var(--accent);
+            box-shadow: 0 0 0 3px rgba(34,197,94,0.18);
           }}
 
-          hr {{
-            border-color: rgba(255,255,255,0.10) !important;
-          }}
-
-          /* ===== Header bar (clean) ===== */
+          /* Header bar */
           .tf-headerbar {{
             background: rgba(255,255,255,0.04);
             border: 1px solid var(--border);
@@ -598,11 +563,9 @@ def inject_css(accent: str) -> None:
             object-fit: cover;
             display: block;
           }}
-          .tf-header-title {{
-            min-width: 0;
-          }}
+          .tf-header-title {{ min-width: 0; }}
           .tf-header-title .name {{
-            font-weight: 900;
+            font-weight: 950;
             font-size: 1.25rem;
             line-height: 1.15;
             margin: 0;
@@ -624,26 +587,15 @@ def inject_css(accent: str) -> None:
             flex-wrap: wrap;
             justify-content: flex-end;
           }}
-          .tf-chip {{
-            display:inline-flex;
-            align-items:center;
-            gap: 6px;
-            padding: 6px 10px;
-            border-radius: 999px;
-            border: 1px solid rgba(255,255,255,0.14);
-            background: rgba(255,255,255,0.05);
-            color: var(--muted) !important;
-            font-size: 0.85rem;
-            white-space: nowrap;
-          }}
 
+          /* Mobile polish */
           @media (max-width: 640px) {{
-            html, body {{ font-size: 16.5px !important; }}
+            html, body {{ font-size: 16.8px !important; }}
             .tf-headerbar {{ padding: 10px 12px; }}
             .tf-header-logo {{ width: 46px; height: 46px; border-radius: 12px; }}
             .tf-header-title .name {{ font-size: 1.12rem; }}
             .tf-header-right {{ display: none; }}
-            div.stButton > button {{ padding: 0.78rem 0.95rem !important; }}
+            div.stButton > button {{ padding: 0.80rem 0.95rem !important; }}
           }}
 
           @media (max-width: 768px) {{
@@ -676,7 +628,7 @@ def render_header_native(cfg: Dict[str, Any]) -> None:
     left_logo_html = (
         f"<img src='{img_src}' alt='logo' />"
         if img_src
-        else f"<div style='font-weight:900;color:var(--text);'>{initials}</div>"
+        else f"<div style='font-weight:950;color:var(--text);'>{initials}</div>"
     )
 
     st.markdown(
@@ -690,9 +642,9 @@ def render_header_native(cfg: Dict[str, Any]) -> None:
             </div>
           </div>
           <div class="tf-header-right">
-            <span class="tf-chip">Offline-friendly</span>
-            <span class="tf-chip">No login</span>
-            <span class="tf-chip">{APP_VERSION}</span>
+            <span class="tf-badge"><span class="tf-badge-dot"></span>Offline-friendly</span>
+            <span class="tf-badge"><span class="tf-badge-dot"></span>No login</span>
+            <span class="tf-badge"><span class="tf-badge-dot"></span>{APP_VERSION}</span>
           </div>
         </div>
         """,
@@ -761,12 +713,12 @@ def flip_score(profit: float, margin_pct: float, sale_price: float) -> float:
 
 def flip_badge(score: float) -> str:
     if score <= 3:
-        return "â Bad Flip"
+        return "Bad flip"
     if score <= 6:
-        return "â ï¸ Risky"
+        return "Risky"
     if score <= 8:
-        return "â Good Flip"
-    return "ð¥ Great Flip"
+        return "Good flip"
+    return "Great flip"
 
 
 # =========================
@@ -779,7 +731,7 @@ CONDITION_TEMPLATES = {
     "Used - Good": "Normal wear from use. Fully functional unless noted. Ships fast.",
     "Used - Fair": "Noticeable wear. Fully functional unless noted. Please review photos/notes.",
     "Used - Poor": "Heavy wear. May have issues. Please read notes carefully.",
-    "For parts/repair": "For parts/repair â sold as-is. May be missing parts or have issues not listed. No returns.",
+    "For parts/repair": "For parts/repair. Sold as-is. No returns.",
 }
 
 PHOTO_CHECKLISTS = {
@@ -829,7 +781,7 @@ PHOTO_CHECKLISTS = {
     ],
 }
 
-# ----- Title rules (Sunday upgrade) -----
+# ---- Title rules ----
 FLUFF_WORDS = {
     "great",
     "amazing",
@@ -837,7 +789,6 @@ FLUFF_WORDS = {
     "nice",
     "wow",
     "look",
-    "l@@k",
     "fast",
     "shipping",
     "must",
@@ -853,7 +804,7 @@ def _clean_token(s: str) -> str:
 
 
 def _strip_fluff(text: str) -> str:
-    words = re.split(r"(\W+)", text)  # keep separators
+    words = re.split(r"(\W+)", text)
     out = []
     for w in words:
         if re.match(r"^\w+$", w):
@@ -865,7 +816,6 @@ def _strip_fluff(text: str) -> str:
 
 def _short_featureize(s: str) -> str:
     s = _clean_token(s)
-    # "13 inch" -> 13"
     s = re.sub(r"\b(\d{1,2})\s*(inches|inch)\b", r'\1"', s, flags=re.IGNORECASE)
     return s
 
@@ -925,34 +875,25 @@ def build_title_variants(
     kws = _keywords_from_features(features_lines, max_k=2)
 
     candidates: List[Tuple[str, List[str]]] = []
-
-    # Best fit (keyword-forward)
-    candidates.append(("â eBay-fit", [b, it, m] + kws))
-
-    # Feature-first
+    candidates.append(("eBay-fit", [b, it, m] + kws))
     if kws:
-        candidates.append(("ð§© Feature-first", [b, it, m, kws[0]]))
+        candidates.append(("feature-first", [b, it, m, kws[0]]))
+    candidates.append(("short", [b, it, m]))
+    candidates.append(("super short", [b, it]))
 
-    # Short / mobile
-    candidates.append(("ð± Short", [b, it, m]))
-
-    # Super short (FB style)
-    candidates.append(("â¡ Super short", [b, it]))
-
-    # Condition variant
     if cond and cond != "For parts/repair":
-        candidates.append(("ð§¼ Condition", [b, it, m, cond]))
+        candidates.append(("condition", [b, it, m, cond]))
     elif cond == "For parts/repair":
-        candidates.append(("ð  Parts/Repair", [b, it, m, "For Parts/Repair"]))
+        candidates.append(("parts/repair", [b, it, m, "For Parts/Repair"]))
 
     seen = set()
     out: List[Tuple[str, str]] = []
 
     for label, parts in candidates:
         limit = ebay_limit
-        if "ð± Short" in label:
+        if label == "short":
             limit = short_limit
-        if "â¡ Super short" in label:
+        if label == "super short":
             limit = super_short_limit
 
         t = _fit_to_limit(parts, limit)
@@ -970,7 +911,7 @@ def build_title_variants(
             break
 
     if not out:
-        out = [("â eBay-fit", _fit_to_limit([b, it, m], ebay_limit) or "Item for sale")]
+        out = [("eBay-fit", _fit_to_limit([b, it, m], ebay_limit) or "Item for sale")]
 
     return out
 
@@ -1005,13 +946,13 @@ def platform_description(
 
 **Condition:** {condition}
 **Quantity:** {qty}
-**Category:** {category or "â"}
+**Category:** {category or "-"}
 
-**Location:** {seller_city or "â"}
-**Pickup:** {pickup_line or "â"}
-**Shipping:** {shipping_line or "â"}
-**Handling time:** {handling_time or "â"}
-**Returns:** {returns_line or "â"}
+**Location:** {seller_city or "-"}
+**Pickup:** {pickup_line or "-"}
+**Shipping:** {shipping_line or "-"}
+**Handling time:** {handling_time or "-"}
+**Returns:** {returns_line or "-"}
 
 {parts_repair_note}
 """.strip()
@@ -1033,10 +974,10 @@ def platform_description(
             lines.append("Notes/defects:")
             lines.extend([f"â¢ {x}" for x in defects])
             lines.append("")
-        lines.append(f"Pickup: {pickup_line or 'â'}")
-        lines.append(f"Shipping: {shipping_line or 'â'}")
-        lines.append(f"Location: {seller_city or 'â'}")
-        lines.append(f"Returns: {returns_line or 'â'}")
+        lines.append(f"Pickup: {pickup_line or '-'}")
+        lines.append(f"Shipping: {shipping_line or '-'}")
+        lines.append(f"Location: {seller_city or '-'}")
+        lines.append(f"Returns: {returns_line or '-'}")
         if parts_repair_note:
             lines.append("")
             lines.append(parts_repair_note.replace("**", ""))
@@ -1073,8 +1014,8 @@ def platform_description(
             lines.append("Notes:")
             lines.extend([f"â¢ {x}" for x in defects])
         lines.append("")
-        lines.append(f"Pickup: {pickup_line or 'â'}")
-        lines.append(f"Location: {seller_city or 'â'}")
+        lines.append(f"Pickup: {pickup_line or '-'}")
+        lines.append(f"Location: {seller_city or '-'}")
         if parts_repair_note:
             lines.append("")
             lines.append(parts_repair_note.replace("**", ""))
@@ -1123,7 +1064,7 @@ def build_listing_payload(
     parts_repair_note = ""
     if include_parts_repair_note and condition == "For parts/repair":
         parts_repair_note = (
-            "**For parts/repair note:** Sold as-is for parts/repair. "
+            "**Parts/repair note:** Sold as-is for parts/repair. "
             "May have issues not listed. Please ask questions before purchase."
         )
 
@@ -1146,7 +1087,7 @@ def build_listing_payload(
     return {
         "platform": platform,
         "title": chosen_title,
-        "title_variants": title_variants,  # list[(label,title)]
+        "title_variants": title_variants,
         "desc": desc,
         "features": features,
         "defects": defects,
@@ -1211,11 +1152,6 @@ def reset_flip_checker() -> None:
 # Live preview helper (no counters)
 # =========================
 def maybe_build_live_preview() -> None:
-    """
-    Builds a live preview payload while typing.
-    - Does NOT bump stats
-    - Does NOT log events
-    """
     platform = st.session_state.get(LB_PLATFORM, "eBay")
     brand = st.session_state.get(LB_BRAND, "")
     item = st.session_state.get(LB_ITEM, "")
@@ -1235,7 +1171,7 @@ def maybe_build_live_preview() -> None:
     use_condition_template = bool(st.session_state.get(LB_USE_COND_TMPL, True))
     include_parts_repair_note = bool(st.session_state.get(LB_INCLUDE_PARTS_NOTE, True))
 
-    enough = bool(_clean_token(item)) or (bool(_clean_token(brand)) and bool(_clean_token(item)))
+    enough = bool(_clean_token(item)) or bool(_clean_token(brand))
     if not enough:
         st.session_state.pop("live_listing", None)
         return
@@ -1267,7 +1203,7 @@ def maybe_build_live_preview() -> None:
 # =========================
 st.set_page_config(
     page_title="Resale Listing Builder",
-    page_icon="ð§¾",
+    page_icon="R",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -1312,30 +1248,30 @@ with st.sidebar:
     st.markdown("### Control Panel")
 
     st.toggle("Compact mode (better on phones)", key="compact_mode")
-    st.caption("Compact mode collapses sections + reduces scrolling.")
+    st.caption("Compact mode collapses sections and reduces scrolling.")
 
-    with st.expander("ð Owner Mode", expanded=False):
-        st.caption("Tip: set `ADMIN_PIN` env var to hide admin tools from customers.")
+    with st.expander("Owner Mode", expanded=False):
+        st.caption("Tip: set ADMIN_PIN env var to hide admin tools from customers.")
         pin_input = st.text_input("Enter PIN", type="password", placeholder="Owner PIN")
         if ADMIN_PIN and pin_input and pin_input == ADMIN_PIN:
             is_owner = True
-            st.success("Owner mode enabled â")
+            st.success("Owner mode enabled")
 
     st.markdown("---")
 
     if is_owner:
-        st.markdown("### âï¸ Settings (Owner)")
+        st.markdown("### Settings (Owner)")
         cfg["app_name"] = st.text_input("App name", value=cfg.get("app_name", DEFAULT_CONFIG["app_name"]))
         cfg["tagline"] = st.text_input("Tagline", value=cfg.get("tagline", DEFAULT_CONFIG["tagline"]))
         cfg["accent_color"] = st.color_picker("Accent color", value=cfg.get("accent_color", DEFAULT_CONFIG["accent_color"]))
         cfg["logo_size"] = st.slider("Logo size", 40, 120, value=int(cfg.get("logo_size", 56)), step=2)
-        cfg["show_how_it_works_tab"] = st.toggle("Show âHow it worksâ tab", value=bool(cfg.get("show_how_it_works_tab", True)))
+        cfg["show_how_it_works_tab"] = st.toggle("Show How it works tab", value=bool(cfg.get("show_how_it_works_tab", True)))
 
         uploaded = st.file_uploader("Upload logo (PNG)", type=["png"], help="Owner-only. Overrides other logo sources.")
         if uploaded is not None:
             try:
                 LOGO_OVERRIDE_PATH.write_bytes(uploaded.read())
-                st.success("Logo uploaded â (saved to data/logo_override.png)")
+                st.success("Logo uploaded (saved to data/logo_override.png)")
             except Exception as e:
                 st.error(f"Could not save logo: {e}")
 
@@ -1343,24 +1279,24 @@ with st.sidebar:
         with colA:
             if st.button("Save settings", use_container_width=True):
                 save_config(cfg)
-                st.success("Saved â Refreshingâ¦")
+                st.success("Saved. Refreshing...")
                 st.rerun()
         with colB:
             if st.button("Reset defaults", use_container_width=True):
                 save_config(DEFAULT_CONFIG)
-                st.warning("Reset. Refreshingâ¦")
+                st.warning("Reset. Refreshing...")
                 st.rerun()
 
         st.markdown("---")
-        st.markdown("### ð Owner Dashboard")
+        st.markdown("### Owner Dashboard")
 
         stats = load_stats()
 
-        st.write(f"**Sessions:** {stats.get('sessions', 0)}")
-        st.write(f"**TikTok sessions:** {stats.get('tiktok_sessions', 0)}  *(supports `?src=tiktok` + `?utm_source=tiktok`)*")
-        st.write(f"**Profit checks:** {stats.get('profit_checks', 0)}")
-        st.write(f"**Listings generated:** {stats.get('listings_generated', 0)}")
-        st.write(f"**Emails captured:** {stats.get('emails_captured', 0)}")
+        st.write(f"Sessions: {stats.get('sessions', 0)}")
+        st.write(f"TikTok sessions: {stats.get('tiktok_sessions', 0)}")
+        st.write(f"Profit checks: {stats.get('profit_checks', 0)}")
+        st.write(f"Listings generated: {stats.get('listings_generated', 0)}")
+        st.write(f"Emails captured: {stats.get('emails_captured', 0)}")
 
         st.markdown("#### Sessions by source")
         sbs = stats.get("sessions_by_source", {})
@@ -1395,11 +1331,11 @@ with st.sidebar:
                 use_container_width=True,
             )
         else:
-            st.caption("No waitlist yet (waitlist.csv appears after first signup).")
+            st.caption("No waitlist yet.")
 
     else:
         st.caption("Free tool. No login. Built for fast flips.")
-        st.markdown("**Tracking tip (use this in TikTok bio):**")
+        st.markdown("Tracking tip (use this in TikTok bio):")
         st.code(
             "https://YOUR_APP_URL/?utm_source=tiktok&utm_medium=social&utm_campaign=organic",
             language=None,
@@ -1418,15 +1354,15 @@ with st.sidebar:
 # Header
 # =========================
 render_header_native(cfg)
-st.caption("Listings + Profit + **Flip Score**. Now with smarter titles + live preview. â")
+st.caption("Listings, profit, and flip score. Smarter titles and live preview.")
 
 
 # =========================
 # Tabs
 # =========================
-tabs = ["ð§¾ Listing Builder", "â Flip Checker", "ð Coming Soon"]
+tabs = ["Listing Builder", "Flip Checker", "Coming Soon"]
 if cfg.get("show_how_it_works_tab", True):
-    tabs.append("â¹ï¸ How it works")
+    tabs.append("How it works")
 
 tab_objs = st.tabs(tabs)
 
@@ -1441,7 +1377,7 @@ with tab_objs[0]:
 
     with left:
         st.markdown("### Build your listing")
-        st.caption("Type your info and watch the output update live. Click Generate when youâre ready to count it.")
+        st.caption("Type your info and watch the output update live. Click Generate when you are ready to count it.")
 
         with st.expander("0) Platform", expanded=not compact):
             st.selectbox("Platform", ["eBay", "Facebook Marketplace", "Mercari", "OfferUp"], key=LB_PLATFORM)
@@ -1464,15 +1400,19 @@ with tab_objs[0]:
         with st.expander("2) Features & notes", expanded=not compact):
             colA, colB = st.columns([0.55, 0.45])
             with colA:
+                # Make the Key Features box bigger on mobile
+                features_h = 200 if compact else 160
+                defects_h = 130 if compact else 120
+
                 st.text_area(
                     "Key features (one per line)",
-                    height=140 if not compact else 110,
+                    height=features_h,
                     placeholder="Example:\n16GB RAM\n512GB SSD\nIncludes charger",
                     key=LB_FEATURES,
                 )
                 st.text_area(
                     "Notes / defects (one per line)",
-                    height=120 if not compact else 95,
+                    height=defects_h,
                     placeholder="Example:\nSmall scratch on lid\nBattery service recommended\nNo original box",
                     key=LB_DEFECTS,
                 )
@@ -1496,7 +1436,7 @@ with tab_objs[0]:
                 else:
                     bucket = "Other"
 
-                st.markdown(f'<span class="tf-pill">{bucket}</span>', unsafe_allow_html=True)
+                st.markdown(f'<span class="tf-badge"><span class="tf-badge-dot"></span>{bucket}</span>', unsafe_allow_html=True)
                 for it in PHOTO_CHECKLISTS[bucket]:
                     st.write(f"- {it}")
 
@@ -1510,7 +1450,7 @@ with tab_objs[0]:
                 st.text_input("Handling time", value="Same or next business day", key=LB_HANDLING)
                 st.text_input("Returns policy line", value="No returns (ask questions before buying)", key=LB_RETURNS)
 
-        # --- LIVE PREVIEW BUILD (no counters)
+        # Live preview build (no counters)
         maybe_build_live_preview()
 
         st.markdown("---")
@@ -1539,21 +1479,21 @@ with tab_objs[0]:
                     },
                 )
                 st.session_state["last_listing"] = payload
-                toast("Generated â (counted)")
+                toast("Generated (counted)")
             else:
                 st.warning("Add at least an Item (and optionally Brand/Model) to generate.")
 
     with right:
         st.markdown("### Output")
-        st.caption("Live preview updates as you type. Click **Generate** to count it (and save as last output).")
+        st.caption("Live preview updates as you type. Generate counts it and pins it as last output.")
 
         payload = st.session_state.get("last_listing") or st.session_state.get("live_listing")
 
         if not payload:
             st.info("Start typing an item on the left to see a live preview.")
         else:
-            variants = payload.get("title_variants") or [("â eBay-fit", payload.get("title", "Item for sale"))]
-            display = [f"{lab} â {t}" for (lab, t) in variants]
+            variants = payload.get("title_variants") or [("eBay-fit", payload.get("title", "Item for sale"))]
+            display = [f"{lab} - {t}" for (lab, t) in variants]
 
             default_index = 0
             prev_choice = st.session_state.get(LB_TITLE_PICK)
@@ -1598,10 +1538,13 @@ with tab_objs[0]:
             )
 
             title_len = len(chosen_title)
-            title_fit = "â Fits eBay (â¤80)" if title_len <= 80 else "â ï¸ Over 80 chars"
+            title_fit = "Fits eBay (<= 80)" if title_len <= 80 else "Over 80 chars"
 
             def _title_card():
-                st.write(f"**Length:** {title_len} â¢ {title_fit}")
+                st.markdown(
+                    f"<div class='tf-subtle'>Length: <b>{title_len}</b> &nbsp; â¢ &nbsp; {title_fit}</div>",
+                    unsafe_allow_html=True,
+                )
                 st.text_area("title_out", value=chosen_title, height=80, label_visibility="collapsed")
                 c1, c2 = st.columns([0.55, 0.45])
                 with c1:
@@ -1619,7 +1562,7 @@ with tab_objs[0]:
                 st.text_area(
                     "desc_out",
                     value=desc,
-                    height=260 if not compact else 210,
+                    height=300 if compact else 260,
                     label_visibility="collapsed",
                 )
                 c1, c2 = st.columns([0.55, 0.45])
@@ -1717,7 +1660,7 @@ with tab_objs[1]:
             shipping_cost = st.number_input("Shipping cost ($)", min_value=0.0, value=8.00, step=0.5, key=FC_SHIP_COST)
         else:
             shipping_cost = shipping_estimate(shipping_method, weight)
-            st.caption(f"Estimated shipping: **{money(shipping_cost)}**")
+            st.caption(f"Estimated shipping: {money(shipping_cost)}")
 
     with st.expander("3) Fees", expanded=not compact):
         c1, c2, c3 = st.columns(3)
@@ -1787,7 +1730,7 @@ with tab_objs[1]:
 
     result = st.session_state.get("last_profit")
     if not result:
-        st.info("Click **Calculate profit** to get numbers + Flip Score.")
+        st.info("Click Calculate profit to get numbers + flip score.")
     else:
         profit = float(result["profit"])
         margin = float(result["margin_pct"])
@@ -1803,54 +1746,54 @@ with tab_objs[1]:
         card(
             "Summary",
             lambda: (
-                st.write(f"**All-in cost:** {money(float(result['total_cost']))}"),
-                st.write(f"**Sale price:** {money(float(result['sale_price']))}"),
-                st.write(f"**Profit:** {money(profit)}  â¢  **Margin:** {margin:.1f}%  â¢  **Score:** {score}/10"),
+                st.write(f"All-in cost: {money(float(result['total_cost']))}"),
+                st.write(f"Sale price: {money(float(result['sale_price']))}"),
+                st.write(f"Profit: {money(profit)}  |  Margin: {margin:.1f}%  |  Score: {score}/10"),
             ),
         )
 
         if "Bad" in badge:
-            st.error("â Iâd pass unless you can lower cost or raise sale price.")
+            st.error("Pass unless you can lower cost or raise sale price.")
         elif "Risky" in badge:
-            st.warning("â ï¸ Tight margins â negotiate, reduce shipping, or increase sale price.")
+            st.warning("Tight margins. Negotiate, reduce shipping, or increase sale price.")
         elif "Good" in badge:
-            st.success("â Solid deal for most resellers.")
+            st.success("Solid deal for most resellers.")
         else:
-            st.success("ð¥ Great deal â strong profit/margin combo.")
+            st.success("Strong profit/margin combo.")
 
         st.markdown("#### Breakdown")
         b1, b2 = st.columns(2)
         with b1:
-            st.write(f"- Platform fee: **{money(result['ebay_fee'])}**")
-            st.write(f"- Processing: **{money(result['processing_fee'])}**")
-            st.write(f"- Shipping: **{money(float(result['shipping_cost']))}**")
-            st.write(f"- Packaging: **{money(float(result['packaging_cost']))}**")
+            st.write(f"- Platform fee: {money(result['ebay_fee'])}")
+            st.write(f"- Processing: {money(result['processing_fee'])}")
+            st.write(f"- Shipping: {money(float(result['shipping_cost']))}")
+            st.write(f"- Packaging: {money(float(result['packaging_cost']))}")
         with b2:
-            st.write(f"- COGS: **{money(float(result['cogs']))}**")
-            st.write(f"- Total fees: **{money(result['total_fees'])}**")
-            st.write(f"- Total cost (all-in): **{money(result['total_cost'])}**")
+            st.write(f"- COGS: {money(float(result['cogs']))}")
+            st.write(f"- Total fees: {money(result['total_fees'])}")
+            st.write(f"- Total cost (all-in): {money(result['total_cost'])}")
 
         st.markdown("---")
-        st.markdown("### ð¾ Save profit check")
+        st.markdown("### Save profit check")
         st.button("Save this check (Pro)", disabled=True, use_container_width=True)
-        st.caption("Planned: saved checks, history, notes, and exports. (Not live yet.)")
+        st.caption("Planned: saved checks, history, notes, and exports. Not live yet.")
 
 
 # =========================
 # Tab 3: Coming Soon
 # =========================
 with tab_objs[2]:
-    st.markdown("## ð Coming Soon")
-    st.caption("Free stays free. Pro (later) is for speed + tracking â nothing is locked right now.")
+    st.markdown("## Coming Soon")
+    st.caption("Free stays free. Pro (later) is for speed + tracking. Nothing is locked right now.")
 
     st.markdown("### Planned Pro features (not live yet)")
     st.markdown(
         """
-- ð¾ **Saved Profit Checks** (history + notes per item)  
-- â¡ **Bulk Mode** (check 5â20 items at once)  
-- ð¦ **Inventory Tracker** (buy price, sold price, net profit)  
-- ð **CSV Exports** (taxes + bookkeeping)  
-- ð§  **Smarter Flip Score** presets (time-to-sell vs max profit)  
+- Saved Profit Checks (history + notes per item)
+- Bulk Mode (check 5-20 items at once)
+- Inventory Tracker (buy price, sold price, net profit)
+- CSV Exports (taxes + bookkeeping)
+- Smarter Flip Score presets (time-to-sell vs max profit)
         """.strip()
     )
 
@@ -1860,14 +1803,14 @@ with tab_objs[2]:
     colx, coly = st.columns([0.7, 0.3])
     with colx:
         email_cs = st.text_input("Email", key="email_comingsoon", placeholder="you@example.com")
-        note_cs = st.text_input("What feature do you want most? (optional)", key="note_comingsoon", placeholder="Saved checks, bulk mode, exportsâ¦")
+        note_cs = st.text_input("What feature do you want most? (optional)", key="note_comingsoon", placeholder="Saved checks, bulk mode, exports...")
     with coly:
         if st.button("Join waitlist", key="join_waitlist_cs", use_container_width=True):
             ok, msg = append_waitlist(email_cs, source=st.session_state.get("traffic_source", "unknown"), note=note_cs)
             (st.success(msg) if ok else st.warning(msg))
 
     st.markdown("---")
-    st.info("Tracking tip: use UTM links in bio, e.g. `...?utm_source=tiktok&utm_medium=social&utm_campaign=organic`")
+    st.info("Tracking tip: use UTM links in bio, e.g. ?utm_source=tiktok&utm_medium=social&utm_campaign=organic")
 
 
 # =========================
@@ -1875,21 +1818,17 @@ with tab_objs[2]:
 # =========================
 if cfg.get("show_how_it_works_tab", True):
     with tab_objs[3]:
-        st.markdown("## â¹ï¸ How it works")
+        st.markdown("## How it works")
         st.markdown(
             """
 ### What this app does
-- Drafts copy/paste listings for **eBay**, **Facebook Marketplace**, **Mercari**, and **OfferUp**
-- Calculates profit after:
-  - platform fee %
-  - processing fee %
-  - shipping + packaging
+- Drafts copy/paste listings for eBay, Facebook Marketplace, Mercari, and OfferUp
+- Calculates profit after platform fee, processing fee, shipping, and packaging
 
-### v1.5 update
-- Smarter title rules: keyword-forward + de-fluffed
-- Labeled title variants (eBay-fit / short / super short / parts)
-- Live preview while typing (no need to click Generate to see output)
-- Generate button still exists to âcountâ a listing in stats/events
+### v1.5.1 update
+- Emoji-safe UI (no broken characters on mobile)
+- Smarter title rules and labeled title variants
+- Live preview while typing (Generate still counts it for stats)
 
 ### Privacy
 - No login required
