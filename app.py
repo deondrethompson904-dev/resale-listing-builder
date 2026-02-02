@@ -341,14 +341,39 @@ def _clipboard_js(text: str) -> str:
     """
 
 
-def copy_btn(label: str, text: str, key: str) -> None:
-    if st.button(label, key=key, use_container_width=True):
+def copy_btn(label: str, text: str, key: str, flash_key: str = "") -> None:
+    """One-tap copy with confidence feedback + optional card flash."""
+    now = dt.datetime.utcnow().timestamp()
+    state_key = f"_copied_at_{key}"
+    last = float(st.session_state.get(state_key, 0.0) or 0.0)
+    is_recent = (now - last) < 1.6
+
+    shown_label = "Copied" if is_recent else label
+
+    if st.button(shown_label, key=key, use_container_width=True):
         components.html(_clipboard_js(text), height=0)
+        st.session_state[state_key] = dt.datetime.utcnow().timestamp()
+        if flash_key:
+            st.session_state["_flash_card"] = {"k": flash_key, "t": st.session_state[state_key]}
         toast("Copied")
 
+    if is_recent:
+        st.caption("Copied to clipboard.")
 
-def card(title: str, body_fn) -> None:
-    st.markdown(f'<div class="tf-card"><div class="tf-card-title">{title}</div>', unsafe_allow_html=True)
+
+def card(title: str, body_fn, flash_key: str = "") -> None:
+    """Card wrapper with optional brief highlight after copy."""
+    flash = st.session_state.get("_flash_card") or {}
+    do_flash = False
+    try:
+        if flash_key and flash.get("k") == flash_key:
+            now = dt.datetime.utcnow().timestamp()
+            do_flash = (now - float(flash.get("t", 0.0) or 0.0)) < 1.8
+    except Exception:
+        do_flash = False
+
+    extra = " tf-flash" if do_flash else ""
+    st.markdown(f'<div class="tf-card{extra}"><div class="tf-card-title">{title}</div>', unsafe_allow_html=True)
     body_fn()
     st.markdown("</div>", unsafe_allow_html=True)
 
@@ -500,6 +525,13 @@ def inject_css(accent: str) -> None:
             padding: 14px 14px;
             margin: 10px 0;
           }}
+
+
+          /* Flash highlight (after copy) */
+          .tf-card.tf-flash {
+            border-color: rgba(34,197,94,0.70) !important;
+            box-shadow: 0 0 0 2px rgba(34,197,94,0.18) !important;
+          }
           .tf-card-title {{
             font-weight: 900;
             font-size: 1.02rem;
@@ -1836,41 +1868,3 @@ if cfg.get("show_how_it_works_tab", True):
 - Tracking is anonymous counters + events (no personal identity stored)
             """.strip()
         )
-
-
-def copy_btn(label: str, text: str, key: str, flash_key: str = "") -> None:
-    """One-tap copy with confidence feedback + optional card flash."""
-    now = dt.datetime.utcnow().timestamp()
-    state_key = f"_copied_at_{key}"
-    last = float(st.session_state.get(state_key, 0.0) or 0.0)
-    is_recent = (now - last) < 1.6
-
-    shown_label = "Copied" if is_recent else label
-
-    if st.button(shown_label, key=key, use_container_width=True):
-        components.html(_clipboard_js(text), height=0)
-        st.session_state[state_key] = dt.datetime.utcnow().timestamp()
-        if flash_key:
-            st.session_state["_flash_card"] = {"k": flash_key, "t": st.session_state[state_key]}
-        toast("Copied")
-
-    if is_recent:
-        st.caption("Copied to clipboard.")
-
-
-
-def card(title: str, body_fn, flash_key: str = "") -> None:
-    """Card wrapper with optional brief highlight after copy."""
-    flash = st.session_state.get("_flash_card") or {}
-    do_flash = False
-    try:
-        if flash_key and flash.get("k") == flash_key:
-            now = dt.datetime.utcnow().timestamp()
-            do_flash = (now - float(flash.get("t", 0.0) or 0.0)) < 1.8
-    except Exception:
-        do_flash = False
-
-    extra = " tf-flash" if do_flash else ""
-    st.markdown(f'<div class="tf-card{extra}"><div class="tf-card-title">{title}</div>', unsafe_allow_html=True)
-    body_fn()
-    st.markdown("</div>", unsafe_allow_html=True)
