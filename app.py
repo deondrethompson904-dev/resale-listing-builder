@@ -968,11 +968,11 @@ def platform_description(
         lines.append("")
         if features:
             lines.append("Features:")
-            lines.extend([f"â¢ {x}" for x in features])
+            lines.extend([f"Ã¢ÂÂ¢ {x}" for x in features])
             lines.append("")
         if defects:
             lines.append("Notes/defects:")
-            lines.extend([f"â¢ {x}" for x in defects])
+            lines.extend([f"Ã¢ÂÂ¢ {x}" for x in defects])
             lines.append("")
         lines.append(f"Pickup: {pickup_line or '-'}")
         lines.append(f"Shipping: {shipping_line or '-'}")
@@ -1008,11 +1008,11 @@ def platform_description(
         if features:
             lines.append("")
             lines.append("Highlights:")
-            lines.extend([f"â¢ {x}" for x in features])
+            lines.extend([f"Ã¢ÂÂ¢ {x}" for x in features])
         if defects:
             lines.append("")
             lines.append("Notes:")
-            lines.extend([f"â¢ {x}" for x in defects])
+            lines.extend([f"Ã¢ÂÂ¢ {x}" for x in defects])
         lines.append("")
         lines.append(f"Pickup: {pickup_line or '-'}")
         lines.append(f"Location: {seller_city or '-'}")
@@ -1542,13 +1542,13 @@ with tab_objs[0]:
 
             def _title_card():
                 st.markdown(
-                    f"<div class='tf-subtle'>Length: <b>{title_len}</b> &nbsp; â¢ &nbsp; {title_fit}</div>",
+                    f"<div class='tf-subtle'>Length: <b>{title_len}</b> &nbsp; Ã¢ÂÂ¢ &nbsp; {title_fit}</div>",
                     unsafe_allow_html=True,
                 )
                 st.text_area("title_out", value=chosen_title, height=80, label_visibility="collapsed")
                 c1, c2 = st.columns([0.55, 0.45])
                 with c1:
-                    copy_btn("Copy title", chosen_title, key="copy_title_btn")
+                    copy_btn("Copy title", chosen_title, key="copy_title_btn", flash_key="copy_title_btn")
                 with c2:
                     st.download_button(
                         "Download title (.txt)",
@@ -1567,7 +1567,7 @@ with tab_objs[0]:
                 )
                 c1, c2 = st.columns([0.55, 0.45])
                 with c1:
-                    copy_btn("Copy description", desc, key="copy_desc_btn")
+                    copy_btn("Copy description", desc, key="copy_desc_btn", flash_key="copy_desc_btn")
                 with c2:
                     st.download_button(
                         "Download description (.txt)",
@@ -1577,12 +1577,12 @@ with tab_objs[0]:
                         use_container_width=True,
                     )
 
-            card("Title", _title_card)
-            card(f"Description ({platform_out})", _desc_card)
+            card("Title", _title_card, flash_key="copy_title_btn")
+            card(f"Description ({platform_out})", _desc_card, flash_key="copy_desc_btn")
 
             st.markdown("---")
             all_text = f"TITLE:\n{chosen_title}\n\nDESCRIPTION ({platform_out}):\n{desc}\n"
-            copy_btn("Copy ALL (title + description)", all_text, key="copy_all_listing_btn")
+            copy_btn("Copy ALL (title + description)", all_text, key="copy_all_listing_btn", flash_key="copy_desc_btn")
 
     st.markdown("---")
     st.markdown("### Get updates (optional)")
@@ -1836,3 +1836,41 @@ if cfg.get("show_how_it_works_tab", True):
 - Tracking is anonymous counters + events (no personal identity stored)
             """.strip()
         )
+
+
+def copy_btn(label: str, text: str, key: str, flash_key: str = "") -> None:
+    """One-tap copy with confidence feedback + optional card flash."""
+    now = dt.datetime.utcnow().timestamp()
+    state_key = f"_copied_at_{key}"
+    last = float(st.session_state.get(state_key, 0.0) or 0.0)
+    is_recent = (now - last) < 1.6
+
+    shown_label = "Copied" if is_recent else label
+
+    if st.button(shown_label, key=key, use_container_width=True):
+        components.html(_clipboard_js(text), height=0)
+        st.session_state[state_key] = dt.datetime.utcnow().timestamp()
+        if flash_key:
+            st.session_state["_flash_card"] = {"k": flash_key, "t": st.session_state[state_key]}
+        toast("Copied")
+
+    if is_recent:
+        st.caption("Copied to clipboard.")
+
+
+
+def card(title: str, body_fn, flash_key: str = "") -> None:
+    """Card wrapper with optional brief highlight after copy."""
+    flash = st.session_state.get("_flash_card") or {}
+    do_flash = False
+    try:
+        if flash_key and flash.get("k") == flash_key:
+            now = dt.datetime.utcnow().timestamp()
+            do_flash = (now - float(flash.get("t", 0.0) or 0.0)) < 1.8
+    except Exception:
+        do_flash = False
+
+    extra = " tf-flash" if do_flash else ""
+    st.markdown(f'<div class="tf-card{extra}"><div class="tf-card-title">{title}</div>', unsafe_allow_html=True)
+    body_fn()
+    st.markdown("</div>", unsafe_allow_html=True)
