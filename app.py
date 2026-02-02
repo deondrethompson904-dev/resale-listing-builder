@@ -342,7 +342,11 @@ def _clipboard_js(text: str) -> str:
 
 
 def copy_btn(label: str, text: str, key: str, flash_key: str = "") -> None:
-    """One-tap copy with confidence feedback + optional card flash."""
+    """One-tap copy with confidence feedback + optional card flash.
+    - Button label briefly becomes "Copied"
+    - Inline confirmation appears (helps on mobile)
+    - flash_key triggers a brief highlight on the matching card
+    """
     now = dt.datetime.utcnow().timestamp()
     state_key = f"_copied_at_{key}"
     last = float(st.session_state.get(state_key, 0.0) or 0.0)
@@ -352,13 +356,16 @@ def copy_btn(label: str, text: str, key: str, flash_key: str = "") -> None:
 
     if st.button(shown_label, key=key, use_container_width=True):
         components.html(_clipboard_js(text), height=0)
-        st.session_state[state_key] = dt.datetime.utcnow().timestamp()
+        ts = dt.datetime.utcnow().timestamp()
+        st.session_state[state_key] = ts
         if flash_key:
-            st.session_state["_flash_card"] = {"k": flash_key, "t": st.session_state[state_key]}
-        toast("Copied")
+            st.session_state["_flash_card"] = {"k": flash_key, "t": ts}
+        toast("Copied â")
 
     if is_recent:
         st.caption("Copied to clipboard.")
+
+
 
 
 def card(title: str, body_fn, flash_key: str = "") -> None:
@@ -376,6 +383,8 @@ def card(title: str, body_fn, flash_key: str = "") -> None:
     st.markdown(f'<div class="tf-card{extra}"><div class="tf-card-title">{title}</div>', unsafe_allow_html=True)
     body_fn()
     st.markdown("</div>", unsafe_allow_html=True)
+
+
 
 
 # =========================
@@ -526,12 +535,12 @@ def inject_css(accent: str) -> None:
             margin: 10px 0;
           }}
 
-
           /* Flash highlight (after copy) */
-          .tf-card.tf-flash {
+          .tf-card.tf-flash {{
             border-color: rgba(34,197,94,0.70) !important;
             box-shadow: 0 0 0 2px rgba(34,197,94,0.18) !important;
-          }
+          }}
+
           .tf-card-title {{
             font-weight: 900;
             font-size: 1.02rem;
@@ -969,25 +978,31 @@ def platform_description(
     def_bul = "\n".join([f"- {x}" for x in defects]) if defects else ""
 
     if platform == "ebay":
-        return f"""
-## {title}
+        key_features_block = ""
+        if feat_bul:
+            key_features_block = "### Key features\n" + feat_bul + "\n\n"
 
-{("### Key features\n" + feat_bul) if feat_bul else ""}
+        notes_block = ""
+        if def_bul:
+            notes_block = "### Notes / defects\n" + def_bul + "\n\n"
 
-{("### Notes / defects\n" + def_bul) if def_bul else ""}
+        parts_block = (parts_repair_note + "\n") if parts_repair_note else ""
 
-**Condition:** {condition}
-**Quantity:** {qty}
-**Category:** {category or "-"}
+        return (
+            f"## {title}\n\n"
+            f"{key_features_block}"
+            f"{notes_block}"
+            f"**Condition:** {condition}\n"
+            f"**Quantity:** {qty}\n"
+            f"**Category:** {category or 'â'}\n\n"
+            f"**Location:** {seller_city or 'â'}\n"
+            f"**Pickup:** {pickup_line or 'â'}\n"
+            f"**Shipping:** {shipping_line or 'â'}\n"
+            f"**Handling time:** {handling_time or 'â'}\n"
+            f"**Returns:** {returns_line or 'â'}\n\n"
+            f"{parts_block}"
+        ).strip()
 
-**Location:** {seller_city or "-"}
-**Pickup:** {pickup_line or "-"}
-**Shipping:** {shipping_line or "-"}
-**Handling time:** {handling_time or "-"}
-**Returns:** {returns_line or "-"}
-
-{parts_repair_note}
-""".strip()
 
     if platform in ("facebook marketplace", "facebook"):
         lines = []
