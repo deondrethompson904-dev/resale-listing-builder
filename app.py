@@ -755,12 +755,12 @@ def flip_score(profit: float, margin_pct: float, sale_price: float) -> float:
 
 def flip_badge(score: float) -> str:
     if score <= 3:
-        return "â Bad Flip"
+        return "Bad Flip"
     if score <= 6:
-        return "â ï¸ Risky"
+        return "Risky"
     if score <= 8:
-        return "â Good Flip"
-    return "ð¥ Great Flip"
+        return "Good Flip"
+    return "Great Flip"
 
 
 # =========================
@@ -1251,7 +1251,7 @@ def maybe_build_live_preview() -> None:
 # =========================
 st.set_page_config(
     page_title="Resale Listing Builder",
-    page_icon="ð§¾",
+    page_icon="R",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -1408,9 +1408,9 @@ st.caption("Listings, profit, and flip score. Smarter titles and live preview.")
 # =========================
 # Tabs
 # =========================
-tabs = ["ð§¾ Listing Builder", "â Flip Checker", "ð Coming Soon"]
+tabs = ["Listing Builder", "Flip Checker", "Coming Soon"]
 if cfg.get("show_how_it_works_tab", True):
-    tabs.append("â¹ï¸ How it works")
+    tabs.append("How it works")
 
 tab_objs = st.tabs(tabs)
 
@@ -1816,7 +1816,7 @@ with tab_objs[1]:
         elif "Risky" in badge:
             st.warning("Tight margins. Negotiate, reduce shipping, or increase sale price.")
         elif "Good" in badge:
-            st.success("â Solid deal for most resellers.")
+            st.success("Solid deal for most resellers.")
         else:
             st.success("Strong profit/margin combo.")
 
