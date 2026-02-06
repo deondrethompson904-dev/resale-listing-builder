@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import os
 import re
 import json
@@ -754,12 +755,12 @@ def flip_score(profit: float, margin_pct: float, sale_price: float) -> float:
 
 def flip_badge(score: float) -> str:
     if score <= 3:
-        return "Bad flip"
+        return "â Bad Flip"
     if score <= 6:
-        return "Risky"
+        return "â ï¸ Risky"
     if score <= 8:
-        return "Good flip"
-    return "Great flip"
+        return "â Good Flip"
+    return "ð¥ Great Flip"
 
 
 # =========================
@@ -1015,11 +1016,11 @@ def platform_description(
         lines.append("")
         if features:
             lines.append("Features:")
-            lines.extend([f"Ã¢ÂÂ¢ {x}" for x in features])
+            lines.extend([f"ÂÂ¢ {x}" for x in features])
             lines.append("")
         if defects:
             lines.append("Notes/defects:")
-            lines.extend([f"Ã¢ÂÂ¢ {x}" for x in defects])
+            lines.extend([f"ÂÂ¢ {x}" for x in defects])
             lines.append("")
         lines.append(f"Pickup: {pickup_line or '-'}")
         lines.append(f"Shipping: {shipping_line or '-'}")
@@ -1055,11 +1056,11 @@ def platform_description(
         if features:
             lines.append("")
             lines.append("Highlights:")
-            lines.extend([f"Ã¢ÂÂ¢ {x}" for x in features])
+            lines.extend([f"ÂÂ¢ {x}" for x in features])
         if defects:
             lines.append("")
             lines.append("Notes:")
-            lines.extend([f"Ã¢ÂÂ¢ {x}" for x in defects])
+            lines.extend([f"ÂÂ¢ {x}" for x in defects])
         lines.append("")
         lines.append(f"Pickup: {pickup_line or '-'}")
         lines.append(f"Location: {seller_city or '-'}")
@@ -1250,7 +1251,7 @@ def maybe_build_live_preview() -> None:
 # =========================
 st.set_page_config(
     page_title="Resale Listing Builder",
-    page_icon="R",
+    page_icon="ð§¾",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -1407,9 +1408,9 @@ st.caption("Listings, profit, and flip score. Smarter titles and live preview.")
 # =========================
 # Tabs
 # =========================
-tabs = ["Listing Builder", "Flip Checker", "Coming Soon"]
+tabs = ["ð§¾ Listing Builder", "â Flip Checker", "ð Coming Soon"]
 if cfg.get("show_how_it_works_tab", True):
-    tabs.append("How it works")
+    tabs.append("â¹ï¸ How it works")
 
 tab_objs = st.tabs(tabs)
 
@@ -1589,7 +1590,7 @@ with tab_objs[0]:
 
             def _title_card():
                 st.markdown(
-                    f"<div class='tf-subtle'>Length: <b>{title_len}</b> &nbsp; Ã¢ÂÂ¢ &nbsp; {title_fit}</div>",
+                    f"<div class='tf-subtle'>Length: <b>{title_len}</b> &nbsp; ÂÂ¢ &nbsp; {title_fit}</div>",
                     unsafe_allow_html=True,
                 )
                 st.text_area("title_out", value=chosen_title, height=80, label_visibility="collapsed")
@@ -1789,6 +1790,17 @@ with tab_objs[1]:
         top[1].metric("Margin", f"{margin:.1f}%")
         top[2].metric("Flip Score", f"{score} / 10")
         top[3].metric("Verdict", badge)
+        # Colorful verdict pill
+        cls = "tf-verdict-pill tf-verdict-good"
+        if "Bad" in badge:
+            cls = "tf-verdict-pill tf-verdict-bad"
+        elif "Risky" in badge:
+            cls = "tf-verdict-pill tf-verdict-risky"
+        elif "Great" in badge:
+            cls = "tf-verdict-pill tf-verdict-great"
+
+        st.markdown(f"<span class='{cls}'>Verdict: {badge}</span>", unsafe_allow_html=True)
+
 
         card(
             "Summary",
@@ -1804,7 +1816,7 @@ with tab_objs[1]:
         elif "Risky" in badge:
             st.warning("Tight margins. Negotiate, reduce shipping, or increase sale price.")
         elif "Good" in badge:
-            st.success("Solid deal for most resellers.")
+            st.success("â Solid deal for most resellers.")
         else:
             st.success("Strong profit/margin combo.")
 
